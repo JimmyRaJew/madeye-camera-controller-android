@@ -1,16 +1,49 @@
-# fortress_camera_controller
+# MadEye Camera Controller Android
 
-A new Flutter project.
+This repository now contains both the new Flutter controller app and the legacy Java projects it is replacing or referencing.
 
-## Getting Started
+## Projects
 
-This project is a starting point for a Flutter application.
+### `fortress_camera_controller`
 
-A few resources to get you started if this is your first Flutter project:
+The Flutter app lives at the repo root.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Useful commands:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter analyze
+flutter test
+flutter run
+```
+
+### `desktop_poc`
+
+Legacy Java Swing desktop proof of concept for camera viewing and command/control.
+
+Run it with:
+
+```bash
+cd desktop_poc
+./run_camera_viewer.sh
+```
+
+### `tablet_kiosk`
+
+Legacy native Android Java kiosk app and protocol reference.
+
+Open in Android Studio or inspect the Java source under:
+
+```text
+tablet_kiosk/app/src/main/java/com/fortress/kiosk/
+```
+
+## Why both are here
+
+The Flutter app is the active replacement target.
+
+The Java projects remain in the repository as working references for:
+
+- camera event parsing
+- command protocol behavior
+- device settings flows
+- user, database, and firmware control screens
