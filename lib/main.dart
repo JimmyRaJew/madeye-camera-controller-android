@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'src/models/madeye_models.dart';
+import 'src/services/madeye_event_server.dart';
+
 void main() {
   runApp(const FortressCameraControllerApp());
 }
@@ -171,13 +174,36 @@ class ControllerHomePage extends StatefulWidget {
 
 class _ControllerHomePageState extends State<ControllerHomePage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final MadeyeEventServer _eventServer = MadeyeEventServer();
   MenuSection _selectedSection = menuSections.first;
+  late MadeyeControllerState _controllerState;
 
   void _selectMenu(MenuSection section) {
     setState(() {
       _selectedSection = section;
     });
     Navigator.of(context).pop();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _controllerState = _eventServer.currentState;
+    _eventServer.stream.listen((state) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _controllerState = state;
+      });
+    });
+    _eventServer.start();
+  }
+
+  @override
+  void dispose() {
+    _eventServer.dispose();
+    super.dispose();
   }
 
   @override
@@ -195,13 +221,15 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
           'Fortress Camera Controller',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
-        actions: const [
+        actions: [
           Padding(
             padding: EdgeInsets.only(right: 16),
             child: Center(
               child: _StatusBadge(
-                label: 'Listener Offline',
-                color: AppColors.red,
+                label: _controllerState.listenerRunning
+                    ? 'Listening ${_controllerState.eventPort}'
+                    : 'Listener Offline',
+                color: _controllerState.listenerRunning ? AppColors.blue : AppColors.red,
               ),
             ),
           ),
@@ -234,20 +262,20 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Wrap(
+              Wrap(
                 spacing: 12,
                 runSpacing: 12,
                 children: [
                   _InfoChip(
-                    label: 'Camera 192.168.1.111',
+                    label: 'Camera ${_controllerState.cameraHost}',
                     color: AppColors.teal,
                   ),
                   _InfoChip(
-                    label: 'Event Port 7777',
-                    color: AppColors.amber,
+                    label: 'Event Port ${_controllerState.eventPort}',
+                    color: _controllerState.listenerRunning ? AppColors.blue : AppColors.amber,
                   ),
                   _InfoChip(
-                    label: 'Command Port 7778',
+                    label: 'Command Port ${_controllerState.commandPort}',
                     color: AppColors.red,
                   ),
                 ],
@@ -257,7 +285,17 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                 child: SingleChildScrollView(
                   child: _SectionContent(
                     section: _selectedSection,
+                    controllerState: _controllerState,
                     onOpenMenu: () => _scaffoldKey.currentState?.openDrawer(),
+                    onStartListener: () {
+                      _eventServer.start();
+                    },
+                    onStopListener: () {
+                      _eventServer.stop();
+                    },
+                    onRestartListener: () {
+                      _eventServer.restart();
+                    },
                   ),
                 ),
               ),
@@ -358,19 +396,36 @@ class ControlDrawer extends StatelessWidget {
 class _SectionContent extends StatelessWidget {
   const _SectionContent({
     required this.section,
+    required this.controllerState,
     required this.onOpenMenu,
+    required this.onStartListener,
+    required this.onStopListener,
+    required this.onRestartListener,
   });
 
   final MenuSection section;
+  final MadeyeControllerState controllerState;
   final VoidCallback onOpenMenu;
+  final VoidCallback onStartListener;
+  final VoidCallback onStopListener;
+  final VoidCallback onRestartListener;
 
   @override
   Widget build(BuildContext context) {
     switch (section.title) {
       case 'Camera Viewer':
-        return _CameraViewerPanel(onOpenMenu: onOpenMenu);
+        return _CameraViewerPanel(
+          state: controllerState,
+          onOpenMenu: onOpenMenu,
+        );
       case 'Live Events':
-        return _LiveEventsPanel(onOpenMenu: onOpenMenu);
+        return _LiveEventsPanel(
+          state: controllerState,
+          onOpenMenu: onOpenMenu,
+          onStartListener: onStartListener,
+          onStopListener: onStopListener,
+          onRestartListener: onRestartListener,
+        );
       case 'Video Settings':
         return _SettingsPanel(
           icon: Icons.tune_rounded,
@@ -483,13 +538,17 @@ class _SectionContent extends StatelessWidget {
 
 class _CameraViewerPanel extends StatelessWidget {
   const _CameraViewerPanel({
+    required this.state,
     required this.onOpenMenu,
   });
 
+  final MadeyeControllerState state;
   final VoidCallback onOpenMenu;
 
   @override
   Widget build(BuildContext context) {
+    final frame = state.lastFrameBytes;
+
     return Column(
       children: [
         Container(
@@ -512,43 +571,64 @@ class _CameraViewerPanel extends StatelessWidget {
                   left: 16,
                   child: _ViewerTag(),
                 ),
-                const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.videocam_outlined,
-                        size: 92,
-                        color: AppColors.blue,
-                      ),
-                      SizedBox(height: 18),
-                      Text(
-                        'Camera Viewer',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.text,
+                if (frame != null)
+                  Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: RotatedBox(
+                        quarterTurns: 1,
+                        child: Image.memory(
+                          frame,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
                         ),
                       ),
-                      SizedBox(height: 12),
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 28),
-                        child: Text(
-                          'Live camera frames from the MADEYE event stream will appear inside this white-bordered frame.',
-                          textAlign: TextAlign.center,
+                    ),
+                  )
+                else
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.videocam_outlined,
+                          size: 92,
+                          color: AppColors.blue,
+                        ),
+                        const SizedBox(height: 18),
+                        const Text(
+                          'Camera Viewer',
                           style: TextStyle(
-                            fontSize: 16,
-                            color: AppColors.subtext,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.text,
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 28),
+                          child: Text(
+                            state.listenerRunning
+                                ? 'Listening for MADEYE JPEG frames on port ${state.eventPort}.'
+                                : 'The event listener is offline. Open Live Events to start listening.',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: AppColors.subtext,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const Positioned(
+                Positioned(
                   right: 16,
                   bottom: 16,
-                  child: _OverlayPanel(),
+                  child: _OverlayPanel(
+                    label: state.headline,
+                    value: state.detail,
+                    accent: _eventColor(state.eventType),
+                  ),
                 ),
               ],
             ),
@@ -570,10 +650,18 @@ class _CameraViewerPanel extends StatelessWidget {
 
 class _LiveEventsPanel extends StatelessWidget {
   const _LiveEventsPanel({
+    required this.state,
     required this.onOpenMenu,
+    required this.onStartListener,
+    required this.onStopListener,
+    required this.onRestartListener,
   });
 
+  final MadeyeControllerState state;
   final VoidCallback onOpenMenu;
+  final VoidCallback onStartListener;
+  final VoidCallback onStopListener;
+  final VoidCallback onRestartListener;
 
   @override
   Widget build(BuildContext context) {
@@ -583,11 +671,16 @@ class _LiveEventsPanel extends StatelessWidget {
           title: 'Event Listener',
           icon: Icons.notifications_active_outlined,
           child: Column(
-            children: const [
-              _MetricRow(label: 'Listener State', value: 'Offline'),
-              _MetricRow(label: 'Last Event', value: 'Waiting for camera events'),
-              _MetricRow(label: 'Event Count', value: '0'),
-              _MetricRow(label: 'Last Source', value: '-'),
+            children: [
+              _MetricRow(
+                label: 'Listener State',
+                value: state.listenerRunning ? 'Listening' : 'Offline',
+              ),
+              _MetricRow(label: 'Last Event', value: state.headline),
+              _MetricRow(label: 'Detail', value: state.detail),
+              _MetricRow(label: 'Event Count', value: '${state.eventCount}'),
+              _MetricRow(label: 'Last Source', value: state.lastSource),
+              _MetricRow(label: 'Listener Status', value: state.listenerStatus),
             ],
           ),
         ),
@@ -595,18 +688,37 @@ class _LiveEventsPanel extends StatelessWidget {
         _ConsolePanel(
           icon: Icons.receipt_long_rounded,
           title: 'Latest Events',
-          lines: const [
-            '13:28:01  Listening on 0.0.0.0:7777',
-            '13:28:03  Waiting for camera events',
-            '13:28:05  No incoming frames yet',
-          ],
+          lines: state.logs.map((entry) => entry.formatted).toList(growable: false),
           actionLabel: 'Restart Listener',
+          onPressed: onRestartListener,
         ),
         const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: noop,
-          icon: const Icon(Icons.restart_alt_rounded),
-          label: const Text('Restart Listener'),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: state.listenerRunning ? onRestartListener : onStartListener,
+                icon: Icon(
+                  state.listenerRunning ? Icons.restart_alt_rounded : Icons.play_arrow_rounded,
+                ),
+                label: Text(
+                  state.listenerRunning ? 'Restart Listener' : 'Start Listener',
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: state.listenerRunning ? onStopListener : onOpenMenu,
+                icon: Icon(
+                  state.listenerRunning ? Icons.stop_circle_outlined : Icons.menu_open_rounded,
+                ),
+                label: Text(
+                  state.listenerRunning ? 'Stop Listener' : 'Open Sections',
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -705,12 +817,14 @@ class _ConsolePanel extends StatelessWidget {
     required this.title,
     required this.lines,
     required this.actionLabel,
+    this.onPressed = noop,
   });
 
   final IconData icon;
   final String title;
   final List<String> lines;
   final String actionLabel;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -738,7 +852,7 @@ class _ConsolePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          FilledButton(onPressed: noop, child: Text(actionLabel)),
+          FilledButton(onPressed: onPressed, child: Text(actionLabel)),
         ],
       ),
     );
@@ -963,7 +1077,15 @@ class _ViewerTag extends StatelessWidget {
 }
 
 class _OverlayPanel extends StatelessWidget {
-  const _OverlayPanel();
+  const _OverlayPanel({
+    required this.label,
+    required this.value,
+    required this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) {
@@ -974,12 +1096,12 @@ class _OverlayPanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'Status',
+            label,
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -988,15 +1110,33 @@ class _OverlayPanel extends StatelessWidget {
           ),
           SizedBox(height: 4),
           Text(
-            'Idle',
+            value,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 15,
               fontWeight: FontWeight.w800,
-              color: AppColors.blue,
+              color: accent,
             ),
           ),
         ],
       ),
     );
+  }
+}
+
+Color _eventColor(MadeyeEventType eventType) {
+  switch (eventType) {
+    case MadeyeEventType.faceTooSmall:
+      return AppColors.amber;
+    case MadeyeEventType.headPoseWrong:
+      return const Color(0xFFE8894B);
+    case MadeyeEventType.faceDetected:
+      return AppColors.blue;
+    case MadeyeEventType.accessGranted:
+      return AppColors.teal;
+    case MadeyeEventType.accessDenied:
+    case MadeyeEventType.connectionError:
+      return AppColors.red;
+    case MadeyeEventType.idle:
+      return AppColors.blue;
   }
 }
