@@ -508,7 +508,6 @@ class _SectionContent extends StatelessWidget {
             '1002',
             '1003',
           ],
-          actionLabel: 'Refresh User List',
         );
       case 'Database Tools':
         return _ActionFormPanel(
@@ -689,8 +688,6 @@ class _LiveEventsPanel extends StatelessWidget {
           icon: Icons.receipt_long_rounded,
           title: 'Latest Events',
           lines: state.logs.map((entry) => entry.formatted).toList(growable: false),
-          actionLabel: 'Restart Listener',
-          onPressed: onRestartListener,
         ),
         const SizedBox(height: 16),
         Row(
@@ -816,15 +813,11 @@ class _ConsolePanel extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.lines,
-    required this.actionLabel,
-    this.onPressed = noop,
   });
 
   final IconData icon;
   final String title;
   final List<String> lines;
-  final String actionLabel;
-  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -851,8 +844,6 @@ class _ConsolePanel extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          FilledButton(onPressed: onPressed, child: Text(actionLabel)),
         ],
       ),
     );
