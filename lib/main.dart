@@ -1,6 +1,10 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'src/models/madeye_models.dart';
+import 'src/services/madeye_command_client.dart';
 import 'src/services/madeye_event_server.dart';
 
 void main() {
@@ -175,6 +179,7 @@ class ControllerHomePage extends StatefulWidget {
 class _ControllerHomePageState extends State<ControllerHomePage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final MadeyeEventServer _eventServer = MadeyeEventServer();
+  final MadeyeCommandClient _commandClient = MadeyeCommandClient();
   MenuSection _selectedSection = menuSections.first;
   late MadeyeControllerState _controllerState;
 
@@ -183,6 +188,22 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
       _selectedSection = section;
     });
     Navigator.of(context).pop();
+  }
+
+  int _parseIntField(Map<String, String> values, String key) {
+    return int.parse(values[key]?.trim() ?? '');
+  }
+
+  double _parseDoubleField(Map<String, String> values, String key) {
+    return double.parse(values[key]?.trim() ?? '');
+  }
+
+  Future<Uint8List> _readFileBytes(String path) async {
+    return File(path).readAsBytes();
+  }
+
+  Future<String> _readFileText(String path) async {
+    return File(path).readAsString();
   }
 
   @override
@@ -286,6 +307,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                   child: _SectionContent(
                     section: _selectedSection,
                     controllerState: _controllerState,
+                    commandClient: _commandClient,
                     onOpenMenu: () => _scaffoldKey.currentState?.openDrawer(),
                     onStartListener: () {
                       _eventServer.start();
@@ -296,6 +318,15 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     onRestartListener: () {
                       _eventServer.restart();
                     },
+                    onStateChanged: (update) {
+                      setState(() {
+                        _controllerState = update(_controllerState);
+                      });
+                    },
+                    onReadFileBytes: _readFileBytes,
+                    onReadFileText: _readFileText,
+                    onParseIntField: _parseIntField,
+                    onParseDoubleField: _parseDoubleField,
                   ),
                 ),
               ),
@@ -397,18 +428,30 @@ class _SectionContent extends StatelessWidget {
   const _SectionContent({
     required this.section,
     required this.controllerState,
+    required this.commandClient,
     required this.onOpenMenu,
     required this.onStartListener,
     required this.onStopListener,
     required this.onRestartListener,
+    required this.onStateChanged,
+    required this.onReadFileBytes,
+    required this.onReadFileText,
+    required this.onParseIntField,
+    required this.onParseDoubleField,
   });
 
   final MenuSection section;
   final MadeyeControllerState controllerState;
+  final MadeyeCommandClient commandClient;
   final VoidCallback onOpenMenu;
   final VoidCallback onStartListener;
   final VoidCallback onStopListener;
   final VoidCallback onRestartListener;
+  final void Function(MadeyeControllerState Function(MadeyeControllerState)) onStateChanged;
+  final Future<Uint8List> Function(String path) onReadFileBytes;
+  final Future<String> Function(String path) onReadFileText;
+  final int Function(Map<String, String>, String) onParseIntField;
+  final double Function(Map<String, String>, String) onParseDoubleField;
 
   @override
   Widget build(BuildContext context) {
@@ -434,11 +477,38 @@ class _SectionContent extends StatelessWidget {
             _FieldSpec('Frame Width', '480'),
             _FieldSpec('Frame Height', '640'),
             _FieldSpec('Rotation', '90'),
-            _FieldSpec('Camera', 'RGB'),
-            _FieldSpec('Balance', 'On'),
+            _FieldSpec('Camera', '0'),
+            _FieldSpec('Balance', '0'),
           ],
           primaryLabel: 'Get',
           secondaryLabel: 'Set',
+          onPrimary: (values) async {
+            final result = await commandClient.videoGet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+            );
+            return {
+              'Frame Width': '${result.width}',
+              'Frame Height': '${result.height}',
+              'Rotation': '${result.rotation}',
+              'Camera': '${result.camera}',
+              'Balance': '${result.balance}',
+            };
+          },
+          onSecondary: (values) async {
+            await commandClient.videoSet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+              VideoSettings(
+                width: onParseIntField(values, 'Frame Width'),
+                height: onParseIntField(values, 'Frame Height'),
+                rotation: onParseIntField(values, 'Rotation'),
+                camera: onParseIntField(values, 'Camera'),
+                balance: onParseIntField(values, 'Balance'),
+              ),
+            );
+            return 'Video settings updated';
+          },
         );
       case 'Face Settings':
         return _SettingsPanel(
@@ -447,12 +517,42 @@ class _SectionContent extends StatelessWidget {
           fields: const [
             _FieldSpec('Threshold', '0.5500'),
             _FieldSpec('Attempts', '3'),
-            _FieldSpec('Liveness', 'On'),
+            _FieldSpec('Liveness', '1'),
             _FieldSpec('Liveness Threshold', '0.7200'),
+            _FieldSpec('Face Minimum', '1'),
             _FieldSpec('Face Size', '160'),
           ],
           primaryLabel: 'Get',
           secondaryLabel: 'Set',
+          onPrimary: (values) async {
+            final result = await commandClient.faceGet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+            );
+            return {
+              'Threshold': result.threshold.toStringAsFixed(4),
+              'Attempts': '${result.attempts}',
+              'Liveness': '${result.liveness}',
+              'Liveness Threshold': result.livenessThreshold.toStringAsFixed(4),
+              'Face Minimum': '${result.faceMinimum}',
+              'Face Size': '${result.faceSize}',
+            };
+          },
+          onSecondary: (values) async {
+            await commandClient.faceSet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+              FaceSettings(
+                threshold: onParseDoubleField(values, 'Threshold'),
+                attempts: onParseIntField(values, 'Attempts'),
+                liveness: onParseIntField(values, 'Liveness'),
+                livenessThreshold: onParseDoubleField(values, 'Liveness Threshold'),
+                faceMinimum: onParseIntField(values, 'Face Minimum'),
+                faceSize: onParseIntField(values, 'Face Size'),
+              ),
+            );
+            return 'Face settings updated';
+          },
         );
       case 'Network Settings':
         return _SettingsPanel(
@@ -465,6 +565,31 @@ class _SectionContent extends StatelessWidget {
           ],
           primaryLabel: 'Get',
           secondaryLabel: 'Set',
+          onPrimary: (values) async {
+            final result = await commandClient.networkGet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+            );
+            return {
+              'Address': result.address,
+              'Gateway': result.gateway,
+              'Mask': result.mask,
+            };
+          },
+          onSecondary: (values) async {
+            final result = NetworkSettings(
+              address: values['Address']?.trim() ?? '',
+              gateway: values['Gateway']?.trim() ?? '',
+              mask: values['Mask']?.trim() ?? '',
+            );
+            await commandClient.networkSet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+              result,
+            );
+            onStateChanged((state) => state.copyWith(cameraHost: result.address));
+            return 'Network settings updated';
+          },
         );
       case 'Communication Settings':
         return _SettingsPanel(
@@ -477,6 +602,44 @@ class _SectionContent extends StatelessWidget {
           ],
           primaryLabel: 'Get',
           secondaryLabel: 'Set',
+          onPrimary: (values) async {
+            final result = await commandClient.commGet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+            );
+            onStateChanged(
+              (state) => state.copyWith(
+                cameraHost: result.host,
+                eventPort: result.eventPort,
+                commandPort: result.commandPort,
+              ),
+            );
+            return {
+              'Event Host': result.host,
+              'Event Port': '${result.eventPort}',
+              'Command Port': '${result.commandPort}',
+            };
+          },
+          onSecondary: (values) async {
+            final result = CommSettings(
+              host: values['Event Host']?.trim() ?? '',
+              eventPort: onParseIntField(values, 'Event Port'),
+              commandPort: onParseIntField(values, 'Command Port'),
+            );
+            await commandClient.commSet(
+              controllerState.cameraHost,
+              controllerState.commandPort,
+              result,
+            );
+            onStateChanged(
+              (state) => state.copyWith(
+                cameraHost: result.host,
+                eventPort: result.eventPort,
+                commandPort: result.commandPort,
+              ),
+            );
+            return 'Communication settings updated';
+          },
         );
       case 'Add User':
         return _ActionFormPanel(
@@ -487,6 +650,28 @@ class _SectionContent extends StatelessWidget {
             _FieldSpec('Face File', '/storage/emulated/0/face.bin'),
           ],
           actions: const ['Choose Face File', 'Add User'],
+          onAction: {
+            'Choose Face File': (values) async {
+              final path = values['Face File']?.trim() ?? '';
+              final file = File(path);
+              if (!await file.exists()) {
+                throw 'Face file not found: $path';
+              }
+              return 'Face file ready: $path';
+            },
+            'Add User': (values) async {
+              final id = values['User ID']?.trim() ?? '';
+              final path = values['Face File']?.trim() ?? '';
+              final face = await onReadFileBytes(path);
+              await commandClient.userAdd(
+                controllerState.cameraHost,
+                controllerState.commandPort,
+                id,
+                face,
+              );
+              return 'User $id enrolled';
+            },
+          },
         );
       case 'Delete User':
         return _ActionFormPanel(
@@ -496,18 +681,30 @@ class _SectionContent extends StatelessWidget {
             _FieldSpec('User ID', '1001'),
           ],
           actions: const ['Delete User', 'Delete All Users'],
+          onAction: {
+            'Delete User': (values) async {
+              final id = values['User ID']?.trim() ?? '';
+              await commandClient.userDelete(
+                controllerState.cameraHost,
+                controllerState.commandPort,
+                id,
+              );
+              return 'User $id deleted';
+            },
+            'Delete All Users': (values) async {
+              await commandClient.userDeleteAll(
+                controllerState.cameraHost,
+                controllerState.commandPort,
+              );
+              return 'All users deleted';
+            },
+          },
         );
       case 'List Users':
-        return _ConsolePanel(
-          icon: Icons.groups_rounded,
-          title: 'Enrolled Users',
-          lines: const [
-            'Count: 3',
-            '',
-            '1001',
-            '1002',
-            '1003',
-          ],
+        return _ListUsersPanel(
+          commandClient: commandClient,
+          cameraHost: controllerState.cameraHost,
+          commandPort: controllerState.commandPort,
         );
       case 'Database Tools':
         return _ActionFormPanel(
@@ -518,6 +715,34 @@ class _SectionContent extends StatelessWidget {
             _FieldSpec('MD5 File', '/storage/emulated/0/camera_database.md5'),
           ],
           actions: const ['Download Database', 'Upload Database'],
+          onAction: {
+            'Download Database': (values) async {
+              final result = await commandClient.databaseGet(
+                controllerState.cameraHost,
+                controllerState.commandPort,
+              );
+              final databaseFile = File(values['Database File']?.trim() ?? '');
+              final md5File = File(values['MD5 File']?.trim() ?? '');
+              await databaseFile.parent.create(recursive: true);
+              await md5File.parent.create(recursive: true);
+              await databaseFile
+                  .writeAsBytes(result.database);
+              await md5File
+                  .writeAsString(result.md5);
+              return 'Database downloaded';
+            },
+            'Upload Database': (values) async {
+              final database = await onReadFileBytes(values['Database File']?.trim() ?? '');
+              final md5 = await onReadFileText(values['MD5 File']?.trim() ?? '');
+              await commandClient.databaseSet(
+                controllerState.cameraHost,
+                controllerState.commandPort,
+                database,
+                md5.trim(),
+              );
+              return 'Database uploaded';
+            },
+          },
         );
       case 'Firmware Update':
         return _ActionFormPanel(
@@ -528,6 +753,28 @@ class _SectionContent extends StatelessWidget {
             _FieldSpec('MD5 File', '/storage/emulated/0/FortressCameraController.md5'),
           ],
           actions: const ['Choose Firmware', 'Upload Firmware'],
+          onAction: {
+            'Choose Firmware': (values) async {
+              final path = values['Firmware Zip']?.trim() ?? '';
+              final file = File(path);
+              if (!await file.exists()) {
+                throw 'Firmware file not found: $path';
+              }
+              final length = await file.length();
+              return 'Firmware ready: $length bytes';
+            },
+            'Upload Firmware': (values) async {
+              final firmware = await onReadFileBytes(values['Firmware Zip']?.trim() ?? '');
+              final md5 = await onReadFileText(values['MD5 File']?.trim() ?? '');
+              await commandClient.firmwareUpdate(
+                controllerState.cameraHost,
+                controllerState.commandPort,
+                firmware,
+                md5.trim(),
+              );
+              return 'Firmware uploaded';
+            },
+          },
         );
       default:
         return const SizedBox.shrink();
@@ -722,13 +969,15 @@ class _LiveEventsPanel extends StatelessWidget {
   }
 }
 
-class _SettingsPanel extends StatelessWidget {
+class _SettingsPanel extends StatefulWidget {
   const _SettingsPanel({
     required this.icon,
     required this.title,
     required this.fields,
     required this.primaryLabel,
     required this.secondaryLabel,
+    required this.onPrimary,
+    required this.onSecondary,
   });
 
   final IconData icon;
@@ -736,29 +985,101 @@ class _SettingsPanel extends StatelessWidget {
   final List<_FieldSpec> fields;
   final String primaryLabel;
   final String secondaryLabel;
+  final Future<Map<String, String>> Function(Map<String, String>) onPrimary;
+  final Future<String?> Function(Map<String, String>) onSecondary;
+
+  @override
+  State<_SettingsPanel> createState() => _SettingsPanelState();
+}
+
+class _SettingsPanelState extends State<_SettingsPanel> {
+  late final List<TextEditingController> _controllers = widget.fields
+      .map((field) => TextEditingController(text: field.value))
+      .toList(growable: false);
+  String? _status;
+
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Map<String, String> _values() {
+    final result = <String, String>{};
+    for (var index = 0; index < widget.fields.length; index++) {
+      result[widget.fields[index].label] = _controllers[index].text;
+    }
+    return result;
+  }
+
+  Future<void> _handleGet() async {
+    try {
+      final values = await widget.onPrimary(_values());
+      for (var index = 0; index < widget.fields.length; index++) {
+        final label = widget.fields[index].label;
+        final value = values[label];
+        if (value != null) {
+          _controllers[index].text = value;
+        }
+      }
+      setState(() {
+        _status = 'Settings loaded';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Get failed: $error';
+      });
+    }
+  }
+
+  Future<void> _handleSet() async {
+    try {
+      final message = await widget.onSecondary(_values());
+      setState(() {
+        _status = message ?? 'Settings updated';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Set failed: $error';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return _PanelShell(
-      title: title,
-      icon: icon,
+      title: widget.title,
+      icon: widget.icon,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _FieldGrid(fields: fields),
+          _FieldGrid(fields: widget.fields, controllers: _controllers),
+          if (_status != null) ...[
+            const SizedBox(height: 14),
+            Text(
+              _status!,
+              style: const TextStyle(
+                color: AppColors.subtext,
+                fontSize: 13,
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: FilledButton(
-                  onPressed: noop,
-                  child: Text(primaryLabel),
+                  onPressed: _handleGet,
+                  child: Text(widget.primaryLabel),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: noop,
-                  child: Text(secondaryLabel),
+                  onPressed: _handleSet,
+                  child: Text(widget.secondaryLabel),
                 ),
               ),
             ],
@@ -769,38 +1090,191 @@ class _SettingsPanel extends StatelessWidget {
   }
 }
 
-class _ActionFormPanel extends StatelessWidget {
+class _ActionFormPanel extends StatefulWidget {
   const _ActionFormPanel({
     required this.icon,
     required this.title,
     required this.fields,
     required this.actions,
+    required this.onAction,
   });
 
   final IconData icon;
   final String title;
   final List<_FieldSpec> fields;
   final List<String> actions;
+  final Map<String, Future<String?> Function(Map<String, String>)> onAction;
+
+  @override
+  State<_ActionFormPanel> createState() => _ActionFormPanelState();
+}
+
+class _ActionFormPanelState extends State<_ActionFormPanel> {
+  late final List<TextEditingController> _controllers = widget.fields
+      .map((field) => TextEditingController(text: field.value))
+      .toList(growable: false);
+  String? _status;
+
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Map<String, String> _values() {
+    final result = <String, String>{};
+    for (var index = 0; index < widget.fields.length; index++) {
+      result[widget.fields[index].label] = _controllers[index].text;
+    }
+    return result;
+  }
+
+  Future<void> _runAction(String action) async {
+    final handler = widget.onAction[action];
+    if (handler == null) {
+      setState(() {
+        _status = 'No handler for $action';
+      });
+      return;
+    }
+
+    try {
+      final message = await handler(_values());
+      setState(() {
+        _status = message ?? '$action complete';
+      });
+    } catch (error) {
+      setState(() {
+        _status = '$action failed: $error';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return _PanelShell(
-      title: title,
-      icon: icon,
+      title: widget.title,
+      icon: widget.icon,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _FieldGrid(fields: fields),
+          _FieldGrid(fields: widget.fields, controllers: _controllers),
+          if (_status != null) ...[
+            const SizedBox(height: 14),
+            Text(
+              _status!,
+              style: const TextStyle(
+                color: AppColors.subtext,
+                fontSize: 13,
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 12,
-            children: actions
+            children: widget.actions
                 .map(
-                  (action) => action == actions.first
-                      ? FilledButton(onPressed: noop, child: Text(action))
-                      : OutlinedButton(onPressed: noop, child: Text(action)),
+                  (action) => action == widget.actions.first
+                      ? FilledButton(
+                          onPressed: () => _runAction(action),
+                          child: Text(action),
+                        )
+                      : OutlinedButton(
+                          onPressed: () => _runAction(action),
+                          child: Text(action),
+                        ),
                 )
                 .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ListUsersPanel extends StatefulWidget {
+  const _ListUsersPanel({
+    required this.commandClient,
+    required this.cameraHost,
+    required this.commandPort,
+  });
+
+  final MadeyeCommandClient commandClient;
+  final String cameraHost;
+  final int commandPort;
+
+  @override
+  State<_ListUsersPanel> createState() => _ListUsersPanelState();
+}
+
+class _ListUsersPanelState extends State<_ListUsersPanel> {
+  String _status = 'Tap refresh to query enrolled users.';
+  List<String> _lines = const ['Count: -', '', 'No results yet.'];
+
+  Future<void> _refreshUsers() async {
+    try {
+      final result = await widget.commandClient.userList(
+        widget.cameraHost,
+        widget.commandPort,
+      );
+      setState(() {
+        _status = 'User list loaded';
+        _lines = [
+          'Count: ${result.count}',
+          '',
+          ...result.rawList
+              .split(RegExp(r'\r?\n'))
+              .where((line) => line.trim().isNotEmpty),
+        ];
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Refresh failed: $error';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PanelShell(
+      title: 'Enrolled Users',
+      icon: Icons.groups_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Text(
+              _lines.join('\n'),
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 14,
+                height: 1.5,
+                color: AppColors.text,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            _status,
+            style: const TextStyle(
+              color: AppColors.subtext,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _refreshUsers,
+            child: const Text('Refresh Users'),
           ),
         ],
       ),
@@ -853,26 +1327,28 @@ class _ConsolePanel extends StatelessWidget {
 class _FieldGrid extends StatelessWidget {
   const _FieldGrid({
     required this.fields,
+    required this.controllers,
   });
 
   final List<_FieldSpec> fields;
+  final List<TextEditingController> controllers;
 
   @override
   Widget build(BuildContext context) {
     return Wrap(
       spacing: 12,
       runSpacing: 12,
-      children: fields
-          .map(
-            (field) => SizedBox(
-              width: 260,
-              child: TextFormField(
-                initialValue: field.value,
-                decoration: InputDecoration(labelText: field.label),
-              ),
-            ),
-          )
-          .toList(),
+      children: fields.asMap().entries.map((entry) {
+        final index = entry.key;
+        final field = entry.value;
+        return SizedBox(
+          width: 260,
+          child: TextFormField(
+            controller: controllers[index],
+            decoration: InputDecoration(labelText: field.label),
+          ),
+        );
+      }).toList(),
     );
   }
 }
