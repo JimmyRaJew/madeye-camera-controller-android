@@ -132,6 +132,7 @@ class MainActivity : FlutterActivity() {
         pendingUsbPermissionResult = result
         pendingUsbPermissionDeviceName = deviceName
         val intent = Intent(usbPermissionAction).apply {
+            setPackage(packageName)
             putExtra("deviceName", deviceName)
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
