@@ -1413,6 +1413,7 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
   String? _selectedDeviceName;
   String _probeStatus =
       'Tap Probe RNDIS on the camera device to test the USB transport.';
+  String _probeSummary = 'No RNDIS probe has been run yet.';
   Map<String, dynamic> _probeDetails = const {};
 
   @override
@@ -1493,6 +1494,7 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
     setState(() {
       _loading = true;
       _probeStatus = 'Probing RNDIS transport for ${device.name}...';
+      _probeSummary = 'Running USB transport check...';
       _probeDetails = const {};
     });
     try {
@@ -1502,11 +1504,33 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
         _probeStatus = details.isEmpty
             ? 'RNDIS probe returned no details.'
             : 'RNDIS probe completed for ${device.name}.';
+        _probeSummary = details.isEmpty
+            ? 'Probe completed, but the camera did not return any transport details.'
+            : details.entries
+                  .map((entry) => '${entry.key}: ${entry.value}')
+                  .join('\n');
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              details.isEmpty
+                  ? 'RNDIS probe completed with no details.'
+                  : 'RNDIS probe completed for ${device.productName == '-' ? device.name : device.productName}.',
+            ),
+          ),
+        );
+      }
     } catch (error) {
       setState(() {
         _probeStatus = 'RNDIS probe failed: $error';
+        _probeSummary = 'Probe failed. See the status text above for details.';
       });
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('RNDIS probe failed: $error')));
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -1534,6 +1558,26 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
             _probeStatus,
             style: const TextStyle(color: AppColors.subtext, fontSize: 13),
           ),
+          if (_probeSummary.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.blueSoft,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.blue),
+              ),
+              child: SelectableText(
+                _probeSummary,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: AppColors.text,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           if (_devices.isEmpty)
             Container(

@@ -188,82 +188,40 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val commInterface = findRndisCommunicationInterface(device)
-        val dataInterface = findRndisDataInterface(device)
-        if (commInterface == null || dataInterface == null) {
+        val commInterfaces = findRndisCommunicationInterfaces(device)
+        val dataInterfaces = findRndisDataInterfaces(device)
+        if (commInterfaces.isEmpty() || dataInterfaces.isEmpty()) {
             result.error("rndis_missing_interfaces", "Could not locate RNDIS communication/data interfaces", null)
             return
         }
 
-        val connection = usbManager.openDevice(device)
-        if (connection == null) {
-            result.error("rndis_open_failed", "Unable to open USB device", null)
-            return
+        val attempts = mutableListOf<String>()
+        for (commInterface in commInterfaces) {
+            for (dataInterface in dataInterfaces) {
+                val label =
+                    "comm ${commInterface.id} class ${commInterface.interfaceClass}/${commInterface.interfaceSubclass}/${commInterface.interfaceProtocol}, " +
+                    "data ${dataInterface.id} class ${dataInterface.interfaceClass}/${dataInterface.interfaceSubclass}/${dataInterface.interfaceProtocol}"
+                val probe = runCatching {
+                    probeRndisPair(device, commInterface, dataInterface)
+                }
+                if (probe.isSuccess) {
+                    val details = probe.getOrThrow().toMutableMap()
+                    details["attempts"] = attempts + "$label -> success"
+                    result.success(details)
+                    return
+                }
+                attempts.add("$label -> ${probe.exceptionOrNull()?.message ?: "unknown error"}")
+            }
         }
 
-        try {
-            if (!connection.claimInterface(commInterface, true)) {
-                result.error("rndis_claim_failed", "Unable to claim communication interface ${commInterface.id}", null)
-                return
-            }
-            if (!connection.claimInterface(dataInterface, true)) {
-                result.error("rndis_claim_failed", "Unable to claim data interface ${dataInterface.id}", null)
-                return
-            }
-
-            val interruptEndpoint = findInterruptInEndpoint(commInterface)
-            val bulkIn = findBulkInEndpoint(dataInterface)
-            val bulkOut = findBulkOutEndpoint(dataInterface)
-            if (interruptEndpoint == null || bulkIn == null || bulkOut == null) {
-                result.error("rndis_missing_endpoints", "Could not locate RNDIS endpoints", null)
-                return
-            }
-
-            val initializeRequestId = 1
-            val initializeRequest = buildRndisInitializeMessage(initializeRequestId, 16384)
-            val initTransferred = sendRndisControlMessage(connection, commInterface.id, initializeRequest)
-            if (initTransferred < 0) {
-                result.error("rndis_init_send_failed", "Failed to send RNDIS initialize message", null)
-                return
-            }
-
-            waitForRndiSNotification(connection, interruptEndpoint)
-            val initResponseBytes = readRndisResponse(connection, commInterface.id)
-            val initResponse = parseRndisInitializeComplete(initResponseBytes)
-
-            val supportedOids = queryRndisBytes(connection, commInterface.id, 0x00010101, 256)
-            val currentAddress = queryRndisBytes(connection, commInterface.id, 0x01010102, 16)
-            val maxFrameSize = queryRndisBytes(connection, commInterface.id, 0x00010106, 8)
-            val linkStatus = queryRndisBytes(connection, commInterface.id, 0x00010114, 8)
-
-            val packetFilter = 0x0000000f
-            val setFilterResponse = setRndisValue(connection, commInterface.id, 0x0001010e, writeInt32LE(packetFilter))
-            val setFilterOk = parseRndisSetComplete(setFilterResponse)
-
-            result.success(
-                mapOf(
-                    "deviceName" to device.deviceName,
-                    "communicationInterface" to commInterface.id,
-                    "dataInterface" to dataInterface.id,
-                    "interruptEndpoint" to interruptEndpoint.address,
-                    "bulkInEndpoint" to bulkIn.address,
-                    "bulkOutEndpoint" to bulkOut.address,
-                    "initialized" to initResponse.success,
-                    "medium" to initResponse.medium,
-                    "maxTransferSize" to initResponse.maxTransferSize,
-                    "packetAlignmentFactor" to initResponse.packetAlignmentFactor,
-                    "currentAddress" to bytesToHex(currentAddress),
-                    "supportedOids" to bytesToHex(supportedOids),
-                    "maxFrameSize" to bytesToHex(maxFrameSize),
-                    "linkStatus" to bytesToHex(linkStatus),
-                    "packetFilterSet" to setFilterOk,
-                )
-            )
-        } catch (error: Exception) {
-            result.error("rndis_probe_failed", error.message, null)
-        } finally {
-            runCatching { connection.close() }
-        }
+        result.error(
+            "rndis_probe_failed",
+            buildString {
+                append("All RNDIS-style interface pairs failed.\n")
+                append(attempts.joinToString("\n"))
+            },
+            null,
+        )
     }
 
     private data class RndisInitializeResult(
@@ -273,27 +231,29 @@ class MainActivity : FlutterActivity() {
         val packetAlignmentFactor: Int,
     )
 
-    private fun findRndisCommunicationInterface(device: UsbDevice): android.hardware.usb.UsbInterface? {
+    private fun findRndisCommunicationInterfaces(device: UsbDevice): List<android.hardware.usb.UsbInterface> {
+        val candidates = mutableListOf<android.hardware.usb.UsbInterface>()
         for (index in 0 until device.interfaceCount) {
             val intf = device.getInterface(index)
             val hasInterrupt = findInterruptInEndpoint(intf) != null
             if (intf.interfaceClass == UsbConstants.USB_CLASS_COMM && hasInterrupt) {
-                return intf
+                candidates.add(intf)
             }
         }
-        return null
+        return candidates.sortedWith(compareBy({ it.interfaceSubclass }, { it.interfaceProtocol }))
     }
 
-    private fun findRndisDataInterface(device: UsbDevice): android.hardware.usb.UsbInterface? {
+    private fun findRndisDataInterfaces(device: UsbDevice): List<android.hardware.usb.UsbInterface> {
+        val candidates = mutableListOf<android.hardware.usb.UsbInterface>()
         for (index in 0 until device.interfaceCount) {
             val intf = device.getInterface(index)
             val hasBulkIn = findBulkInEndpoint(intf) != null
             val hasBulkOut = findBulkOutEndpoint(intf) != null
             if (intf.interfaceClass == UsbConstants.USB_CLASS_CDC_DATA && hasBulkIn && hasBulkOut) {
-                return intf
+                candidates.add(intf)
             }
         }
-        return null
+        return candidates.sortedWith(compareBy({ it.interfaceSubclass }, { it.interfaceProtocol }))
     }
 
     private fun findInterruptInEndpoint(intf: android.hardware.usb.UsbInterface): android.hardware.usb.UsbEndpoint? {
@@ -340,6 +300,74 @@ class MainActivity : FlutterActivity() {
             message.size,
             2000,
         )
+    }
+
+    private fun probeRndisPair(
+        device: UsbDevice,
+        commInterface: android.hardware.usb.UsbInterface,
+        dataInterface: android.hardware.usb.UsbInterface,
+    ): Map<String, Any?> {
+        val usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
+        val connection = usbManager.openDevice(device)
+            ?: throw IllegalStateException("Unable to open USB device")
+
+        try {
+            if (!connection.claimInterface(commInterface, true)) {
+                throw IllegalStateException("Unable to claim communication interface ${commInterface.id}")
+            }
+            if (!connection.claimInterface(dataInterface, true)) {
+                throw IllegalStateException("Unable to claim data interface ${dataInterface.id}")
+            }
+
+            val interruptEndpoint = findInterruptInEndpoint(commInterface)
+                ?: throw IllegalStateException("Communication interface ${commInterface.id} has no interrupt endpoint")
+            val bulkIn = findBulkInEndpoint(dataInterface)
+                ?: throw IllegalStateException("Data interface ${dataInterface.id} has no bulk IN endpoint")
+            val bulkOut = findBulkOutEndpoint(dataInterface)
+                ?: throw IllegalStateException("Data interface ${dataInterface.id} has no bulk OUT endpoint")
+
+            val initializeRequestId = 1
+            val initializeRequest = buildRndisInitializeMessage(initializeRequestId, 16384)
+            val initTransferred = sendRndisControlMessage(connection, commInterface.id, initializeRequest)
+            if (initTransferred < 0) {
+                throw IllegalStateException("Failed to send RNDIS initialize message on interface ${commInterface.id}")
+            }
+
+            waitForRndiSNotification(connection, interruptEndpoint)
+            val initResponseBytes = readRndisResponse(connection, commInterface.id)
+            val initResponse = parseRndisInitializeComplete(initResponseBytes)
+
+            val supportedOids = queryRndisBytes(connection, commInterface.id, 0x00010101, 256)
+            val currentAddress = queryRndisBytes(connection, commInterface.id, 0x01010102, 16)
+            val maxFrameSize = queryRndisBytes(connection, commInterface.id, 0x00010106, 8)
+            val linkStatus = queryRndisBytes(connection, commInterface.id, 0x00010114, 8)
+
+            val packetFilter = 0x0000000f
+            val packetFilterBytes = ByteArray(4)
+            writeInt32LE(packetFilterBytes, 0, packetFilter)
+            val setFilterResponse = setRndisValue(connection, commInterface.id, 0x0001010e, packetFilterBytes)
+            val setFilterOk = parseRndisSetComplete(setFilterResponse)
+
+            return mapOf(
+                "deviceName" to device.deviceName,
+                "communicationInterface" to commInterface.id,
+                "dataInterface" to dataInterface.id,
+                "interruptEndpoint" to interruptEndpoint.address,
+                "bulkInEndpoint" to bulkIn.address,
+                "bulkOutEndpoint" to bulkOut.address,
+                "initialized" to initResponse.success,
+                "medium" to initResponse.medium,
+                "maxTransferSize" to initResponse.maxTransferSize,
+                "packetAlignmentFactor" to initResponse.packetAlignmentFactor,
+                "currentAddress" to bytesToHex(currentAddress),
+                "supportedOids" to bytesToHex(supportedOids),
+                "maxFrameSize" to bytesToHex(maxFrameSize),
+                "linkStatus" to bytesToHex(linkStatus),
+                "packetFilterSet" to setFilterOk,
+            )
+        } finally {
+            runCatching { connection.close() }
+        }
     }
 
     private fun readRndisResponse(connection: UsbDeviceConnection, interfaceId: Int): ByteArray {
@@ -417,7 +445,7 @@ class MainActivity : FlutterActivity() {
     private fun readRndisQueryComplete(connection: UsbDeviceConnection, interfaceId: Int, requestId: Int, responseSize: Int): ByteArray {
         val response = readRndisResponse(connection, interfaceId)
         val messageType = readInt32LE(response, 0)
-        if (messageType != 0x80000004) {
+        if (messageType != 0x80000004.toInt()) {
             throw IllegalStateException("Unexpected RNDIS query response 0x${messageType.toString(16)}")
         }
         val returnedRequestId = readInt32LE(response, 8)
@@ -438,7 +466,7 @@ class MainActivity : FlutterActivity() {
     private fun readRndisSetComplete(connection: UsbDeviceConnection, interfaceId: Int, requestId: Int): ByteArray {
         val response = readRndisResponse(connection, interfaceId)
         val messageType = readInt32LE(response, 0)
-        if (messageType != 0x80000005) {
+        if (messageType != 0x80000005.toInt()) {
             throw IllegalStateException("Unexpected RNDIS set response 0x${messageType.toString(16)}")
         }
         val returnedRequestId = readInt32LE(response, 8)
@@ -454,7 +482,7 @@ class MainActivity : FlutterActivity() {
 
     private fun parseRndisInitializeComplete(response: ByteArray): RndisInitializeResult {
         val messageType = readInt32LE(response, 0)
-        if (messageType != 0x80000002) {
+        if (messageType != 0x80000002.toInt()) {
             throw IllegalStateException("Unexpected RNDIS initialize response 0x${messageType.toString(16)}")
         }
         val status = readInt32LE(response, 12)
@@ -471,7 +499,7 @@ class MainActivity : FlutterActivity() {
 
     private fun parseRndisSetComplete(response: ByteArray): Boolean {
         val messageType = readInt32LE(response, 0)
-        if (messageType != 0x80000005) {
+        if (messageType != 0x80000005.toInt()) {
             return false
         }
         return readInt32LE(response, 12) == 0x00000000
