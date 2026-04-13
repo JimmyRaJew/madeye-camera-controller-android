@@ -8,6 +8,7 @@ import 'src/services/madeye_command_client.dart';
 import 'src/services/madeye_event_server.dart';
 import 'src/services/usb_device_service.dart';
 import 'src/services/usb_network_service.dart';
+import 'src/services/transport_diagnostics_service.dart';
 
 void main() {
   runApp(const FortressCameraControllerApp());
@@ -155,6 +156,11 @@ const menuSections = [
     icon: Icons.router_rounded,
   ),
   MenuSection(
+    title: 'Transport Diagnostics',
+    subtitle: 'Inspect Android network links and probe the camera host.',
+    icon: Icons.network_check_rounded,
+  ),
+  MenuSection(
     title: 'Add User',
     subtitle: 'Enroll a user with a face file.',
     icon: Icons.person_add_alt_1_rounded,
@@ -194,6 +200,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   final MadeyeCommandClient _commandClient = MadeyeCommandClient();
   final UsbDeviceService _usbDeviceService = UsbDeviceService();
   final UsbNetworkService _usbNetworkService = UsbNetworkService();
+  final TransportDiagnosticsService _transportDiagnosticsService = TransportDiagnosticsService();
   MenuSection _selectedSection = menuSections.first;
   late MadeyeControllerState _controllerState;
   String _commandStatus = 'Command channel ready';
@@ -373,6 +380,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     commandClient: _commandClient,
                     usbDeviceService: _usbDeviceService,
                     usbNetworkService: _usbNetworkService,
+                    transportDiagnosticsService: _transportDiagnosticsService,
                     onOpenMenu: () => _scaffoldKey.currentState?.openDrawer(),
                     onStartListener: () {
                       _eventServer.start();
@@ -498,6 +506,7 @@ class _SectionContent extends StatelessWidget {
     required this.commandClient,
     required this.usbDeviceService,
     required this.usbNetworkService,
+    required this.transportDiagnosticsService,
     required this.onOpenMenu,
     required this.onStartListener,
     required this.onStopListener,
@@ -516,6 +525,7 @@ class _SectionContent extends StatelessWidget {
   final MadeyeCommandClient commandClient;
   final UsbDeviceService usbDeviceService;
   final UsbNetworkService usbNetworkService;
+  final TransportDiagnosticsService transportDiagnosticsService;
   final VoidCallback onOpenMenu;
   final VoidCallback onStartListener;
   final VoidCallback onStopListener;
@@ -728,6 +738,15 @@ class _SectionContent extends StatelessWidget {
           cameraHost: controllerState.cameraHost,
           eventPort: controllerState.eventPort,
           commandPort: controllerState.commandPort,
+        );
+      case 'Transport Diagnostics':
+        return _TransportDiagnosticsPanel(
+          transportDiagnosticsService: transportDiagnosticsService,
+          usbNetworkService: usbNetworkService,
+          cameraHost: controllerState.cameraHost,
+          eventPort: controllerState.eventPort,
+          commandPort: controllerState.commandPort,
+          onStateChanged: onStateChanged,
         );
       case 'Add User':
         return _ActionFormPanel(
@@ -1535,6 +1554,230 @@ class _UsbNetworkPanelState extends State<_UsbNetworkPanel> {
                 onPressed: _loading ? null : _probeCamera,
                 icon: const Icon(Icons.wifi_find_rounded),
                 label: const Text('Probe Camera Host'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TransportDiagnosticsPanel extends StatefulWidget {
+  const _TransportDiagnosticsPanel({
+    required this.transportDiagnosticsService,
+    required this.usbNetworkService,
+    required this.cameraHost,
+    required this.eventPort,
+    required this.commandPort,
+    required this.onStateChanged,
+  });
+
+  final TransportDiagnosticsService transportDiagnosticsService;
+  final UsbNetworkService usbNetworkService;
+  final String cameraHost;
+  final int eventPort;
+  final int commandPort;
+  final void Function(MadeyeControllerState Function(MadeyeControllerState)) onStateChanged;
+
+  @override
+  State<_TransportDiagnosticsPanel> createState() => _TransportDiagnosticsPanelState();
+}
+
+class _TransportDiagnosticsPanelState extends State<_TransportDiagnosticsPanel> {
+  List<TransportNetworkInfo> _networks = const [];
+  String _status = 'Tap refresh to inspect transport links.';
+  bool _loading = false;
+  String? _selectedCandidateHost;
+  final List<String> _probes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+  }
+
+  List<String> _candidateHosts() {
+    final candidates = <String>{
+      widget.cameraHost,
+      '192.168.1.111',
+      '192.168.18.111',
+      '192.168.7.2',
+      '192.168.42.1',
+    };
+    for (final network in _networks) {
+      for (final address in network.addresses) {
+        final parts = address.split('.');
+        if (parts.length == 4) {
+          candidates.add('${parts[0]}.${parts[1]}.${parts[2]}.1');
+          candidates.add('${parts[0]}.${parts[1]}.${parts[2]}.2');
+          candidates.add('${parts[0]}.${parts[1]}.${parts[2]}.111');
+        }
+      }
+    }
+    return candidates.toList(growable: false);
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _loading = true;
+      _status = 'Scanning transport links...';
+    });
+    try {
+      final networks = await widget.transportDiagnosticsService.listNetworks();
+      setState(() {
+        _networks = networks;
+        _status = networks.isEmpty
+            ? 'No active transport links found.'
+            : 'Found ${networks.length} active transport link${networks.length == 1 ? '' : 's'}.';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Transport scan failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _probeCandidates() async {
+    setState(() {
+      _loading = true;
+      _status = 'Probing candidate camera hosts...';
+      _probes.clear();
+    });
+    try {
+      final candidates = _candidateHosts();
+      for (final host in candidates) {
+        final eventOpen = await widget.usbNetworkService.probePort(host, widget.eventPort);
+        final commandOpen = await widget.usbNetworkService.probePort(host, widget.commandPort);
+        _probes.add(
+          '$host -> event:${eventOpen ? 'open' : 'closed'} command:${commandOpen ? 'open' : 'closed'}',
+        );
+        if (eventOpen || commandOpen) {
+          _selectedCandidateHost = host;
+          widget.onStateChanged((state) => state.copyWith(cameraHost: host));
+          break;
+        }
+      }
+      setState(() {
+        _status = _selectedCandidateHost == null
+            ? 'No candidate camera host responded.'
+            : 'Camera host appears reachable at $_selectedCandidateHost.';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Probe failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PanelShell(
+      title: 'Transport Diagnostics',
+      icon: Icons.network_check_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _status,
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
+          ),
+          const SizedBox(height: 14),
+          ..._networks.map(
+            (network) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          network.interfaceName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.text,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _InfoChip(label: network.transportLabel, color: AppColors.blue),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Addresses: ${network.addresses.isEmpty ? '-' : network.addresses.join(', ')}',
+                      style: const TextStyle(fontSize: 13, color: AppColors.subtext),
+                    ),
+                    Text(
+                      'Routes: ${network.routes.isEmpty ? '-' : network.routes.join(' | ')}',
+                      style: const TextStyle(fontSize: 13, color: AppColors.subtext),
+                    ),
+                    Text(
+                      'DNS: ${network.dnsServers.isEmpty ? '-' : network.dnsServers.join(', ')}',
+                      style: const TextStyle(fontSize: 13, color: AppColors.subtext),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_probes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Text(
+                _probes.join('\n'),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13, color: AppColors.text),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            _selectedCandidateHost == null
+                ? 'Camera host: ${widget.cameraHost}'
+                : 'Camera host: $_selectedCandidateHost',
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed: _loading ? null : _refresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(_loading ? 'Scanning...' : 'Refresh Transport'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _loading ? null : _probeCandidates,
+                icon: const Icon(Icons.wifi_find_rounded),
+                label: const Text('Probe Candidates'),
               ),
             ],
           ),
