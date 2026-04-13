@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'src/models/madeye_models.dart';
 import 'src/services/madeye_command_client.dart';
 import 'src/services/madeye_event_server.dart';
+import 'src/services/usb_device_service.dart';
 
 void main() {
   runApp(const FortressCameraControllerApp());
@@ -143,6 +144,11 @@ const menuSections = [
     icon: Icons.settings_ethernet_rounded,
   ),
   MenuSection(
+    title: 'USB Devices',
+    subtitle: 'Show what the tablet can enumerate over USB host mode.',
+    icon: Icons.usb_rounded,
+  ),
+  MenuSection(
     title: 'Add User',
     subtitle: 'Enroll a user with a face file.',
     icon: Icons.person_add_alt_1_rounded,
@@ -180,6 +186,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final MadeyeEventServer _eventServer = MadeyeEventServer();
   final MadeyeCommandClient _commandClient = MadeyeCommandClient();
+  final UsbDeviceService _usbDeviceService = UsbDeviceService();
   MenuSection _selectedSection = menuSections.first;
   late MadeyeControllerState _controllerState;
   String _commandStatus = 'Command channel ready';
@@ -357,6 +364,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     section: _selectedSection,
                     controllerState: _controllerState,
                     commandClient: _commandClient,
+                    usbDeviceService: _usbDeviceService,
                     onOpenMenu: () => _scaffoldKey.currentState?.openDrawer(),
                     onStartListener: () {
                       _eventServer.start();
@@ -480,6 +488,7 @@ class _SectionContent extends StatelessWidget {
     required this.section,
     required this.controllerState,
     required this.commandClient,
+    required this.usbDeviceService,
     required this.onOpenMenu,
     required this.onStartListener,
     required this.onStopListener,
@@ -496,6 +505,7 @@ class _SectionContent extends StatelessWidget {
   final MenuSection section;
   final MadeyeControllerState controllerState;
   final MadeyeCommandClient commandClient;
+  final UsbDeviceService usbDeviceService;
   final VoidCallback onOpenMenu;
   final VoidCallback onStartListener;
   final VoidCallback onStopListener;
@@ -697,6 +707,10 @@ class _SectionContent extends StatelessWidget {
             );
             return 'Communication settings updated';
           },
+        );
+      case 'USB Devices':
+        return _UsbDevicesPanel(
+          usbDeviceService: usbDeviceService,
         );
       case 'Add User':
         return _ActionFormPanel(
@@ -1158,6 +1172,158 @@ class _SettingsPanelState extends State<_SettingsPanel> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UsbDevicesPanel extends StatefulWidget {
+  const _UsbDevicesPanel({
+    required this.usbDeviceService,
+  });
+
+  final UsbDeviceService usbDeviceService;
+
+  @override
+  State<_UsbDevicesPanel> createState() => _UsbDevicesPanelState();
+}
+
+class _UsbDevicesPanelState extends State<_UsbDevicesPanel> {
+  List<UsbDeviceInfo> _devices = const [];
+  String _status = 'Tap refresh to enumerate USB devices.';
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _loading = true;
+      _status = 'Scanning USB devices...';
+    });
+    try {
+      final devices = await widget.usbDeviceService.listUsbDevices();
+      setState(() {
+        _devices = devices;
+        _status = devices.isEmpty
+            ? 'No USB devices enumerated.'
+            : 'Found ${devices.length} USB device${devices.length == 1 ? '' : 's'}.';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'USB scan failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PanelShell(
+      title: 'USB Devices',
+      icon: Icons.usb_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _status,
+            style: const TextStyle(
+              color: AppColors.subtext,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_devices.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Text(
+                'No devices have been enumerated yet.',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 14,
+                ),
+              ),
+            )
+          else
+            ..._devices.map(
+              (device) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        device.productName == '-' ? device.name : device.productName,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.text,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        device.summary,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.subtext,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Class ${device.deviceClass}  Subclass ${device.deviceSubclass}  Protocol ${device.deviceProtocol}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.subtext,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Manufacturer: ${device.manufacturerName}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.subtext,
+                        ),
+                      ),
+                      Text(
+                        'Version: ${device.version}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.subtext,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _loading ? null : _refresh,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(_loading ? 'Scanning...' : 'Refresh USB Devices'),
           ),
         ],
       ),
