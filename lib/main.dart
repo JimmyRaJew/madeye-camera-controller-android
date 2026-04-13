@@ -7,6 +7,7 @@ import 'src/models/madeye_models.dart';
 import 'src/services/madeye_command_client.dart';
 import 'src/services/madeye_event_server.dart';
 import 'src/services/usb_device_service.dart';
+import 'src/services/usb_network_service.dart';
 
 void main() {
   runApp(const FortressCameraControllerApp());
@@ -149,6 +150,11 @@ const menuSections = [
     icon: Icons.usb_rounded,
   ),
   MenuSection(
+    title: 'USB Network',
+    subtitle: 'Inspect USB network interfaces and probe camera ports.',
+    icon: Icons.router_rounded,
+  ),
+  MenuSection(
     title: 'Add User',
     subtitle: 'Enroll a user with a face file.',
     icon: Icons.person_add_alt_1_rounded,
@@ -187,6 +193,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   final MadeyeEventServer _eventServer = MadeyeEventServer();
   final MadeyeCommandClient _commandClient = MadeyeCommandClient();
   final UsbDeviceService _usbDeviceService = UsbDeviceService();
+  final UsbNetworkService _usbNetworkService = UsbNetworkService();
   MenuSection _selectedSection = menuSections.first;
   late MadeyeControllerState _controllerState;
   String _commandStatus = 'Command channel ready';
@@ -365,6 +372,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     controllerState: _controllerState,
                     commandClient: _commandClient,
                     usbDeviceService: _usbDeviceService,
+                    usbNetworkService: _usbNetworkService,
                     onOpenMenu: () => _scaffoldKey.currentState?.openDrawer(),
                     onStartListener: () {
                       _eventServer.start();
@@ -489,6 +497,7 @@ class _SectionContent extends StatelessWidget {
     required this.controllerState,
     required this.commandClient,
     required this.usbDeviceService,
+    required this.usbNetworkService,
     required this.onOpenMenu,
     required this.onStartListener,
     required this.onStopListener,
@@ -506,6 +515,7 @@ class _SectionContent extends StatelessWidget {
   final MadeyeControllerState controllerState;
   final MadeyeCommandClient commandClient;
   final UsbDeviceService usbDeviceService;
+  final UsbNetworkService usbNetworkService;
   final VoidCallback onOpenMenu;
   final VoidCallback onStartListener;
   final VoidCallback onStopListener;
@@ -711,6 +721,13 @@ class _SectionContent extends StatelessWidget {
       case 'USB Devices':
         return _UsbDevicesPanel(
           usbDeviceService: usbDeviceService,
+        );
+      case 'USB Network':
+        return _UsbNetworkPanel(
+          usbNetworkService: usbNetworkService,
+          cameraHost: controllerState.cameraHost,
+          eventPort: controllerState.eventPort,
+          commandPort: controllerState.commandPort,
         );
       case 'Add User':
         return _ActionFormPanel(
@@ -1324,6 +1341,202 @@ class _UsbDevicesPanelState extends State<_UsbDevicesPanel> {
             onPressed: _loading ? null : _refresh,
             icon: const Icon(Icons.refresh_rounded),
             label: Text(_loading ? 'Scanning...' : 'Refresh USB Devices'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UsbNetworkPanel extends StatefulWidget {
+  const _UsbNetworkPanel({
+    required this.usbNetworkService,
+    required this.cameraHost,
+    required this.eventPort,
+    required this.commandPort,
+  });
+
+  final UsbNetworkService usbNetworkService;
+  final String cameraHost;
+  final int eventPort;
+  final int commandPort;
+
+  @override
+  State<_UsbNetworkPanel> createState() => _UsbNetworkPanelState();
+}
+
+class _UsbNetworkPanelState extends State<_UsbNetworkPanel> {
+  List<UsbNetworkInterfaceInfo> _interfaces = const [];
+  String _status = 'Tap refresh to inspect USB network interfaces.';
+  bool _loading = false;
+  Map<String, bool> _probeResults = const {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _loading = true;
+      _status = 'Scanning network interfaces...';
+    });
+    try {
+      final interfaces = await widget.usbNetworkService.listInterfaces();
+      setState(() {
+        _interfaces = interfaces;
+        _status = interfaces.isEmpty
+            ? 'No active IPv4 interfaces found.'
+            : 'Found ${interfaces.length} active IPv4 interface${interfaces.length == 1 ? '' : 's'}.';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Interface scan failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _probeCamera() async {
+    setState(() {
+      _loading = true;
+      _status = 'Probing camera host ${widget.cameraHost}...';
+    });
+    try {
+      final eventOpen = await widget.usbNetworkService.probePort(widget.cameraHost, widget.eventPort);
+      final commandOpen = await widget.usbNetworkService.probePort(widget.cameraHost, widget.commandPort);
+      setState(() {
+        _probeResults = {
+          'event': eventOpen,
+          'command': commandOpen,
+        };
+        _status = eventOpen || commandOpen
+            ? 'Camera host responded on ${eventOpen ? 'event' : ''}${eventOpen && commandOpen ? ' and ' : ''}${commandOpen ? 'command' : ''} port.'
+            : 'Camera host did not respond on ${widget.cameraHost}.';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Probe failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PanelShell(
+      title: 'USB Network',
+      icon: Icons.router_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _status,
+            style: const TextStyle(
+              color: AppColors.subtext,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_interfaces.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Text(
+                'No IPv4 interfaces are active right now.',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 14,
+                ),
+              ),
+            )
+          else
+            ..._interfaces.map(
+              (iface) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        iface.name,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.text,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        iface.addresses.join(', '),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.subtext,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+          Text(
+            'Event port: ${widget.eventPort}  Command port: ${widget.commandPort}',
+            style: const TextStyle(
+              color: AppColors.subtext,
+              fontSize: 13,
+            ),
+          ),
+          if (_probeResults.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Event port reachable: ${_probeResults['event'] == true ? 'yes' : 'no'}',
+              style: const TextStyle(color: AppColors.subtext, fontSize: 13),
+            ),
+            Text(
+              'Command port reachable: ${_probeResults['command'] == true ? 'yes' : 'no'}',
+              style: const TextStyle(color: AppColors.subtext, fontSize: 13),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed: _loading ? null : _refresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(_loading ? 'Scanning...' : 'Refresh Interfaces'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _loading ? null : _probeCamera,
+                icon: const Icon(Icons.wifi_find_rounded),
+                label: const Text('Probe Camera Host'),
+              ),
+            ],
           ),
         ],
       ),
