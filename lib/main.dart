@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'src/models/madeye_models.dart';
 import 'src/services/madeye_command_client.dart';
 import 'src/services/madeye_event_server.dart';
+import 'src/services/rndis_probe_service.dart';
 import 'src/services/usb_device_service.dart';
 import 'src/services/usb_network_service.dart';
 import 'src/services/transport_diagnostics_service.dart';
@@ -203,9 +204,11 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final MadeyeEventServer _eventServer = MadeyeEventServer();
   final MadeyeCommandClient _commandClient = MadeyeCommandClient();
+  final RndisProbeService _rndisProbeService = RndisProbeService();
   final UsbDeviceService _usbDeviceService = UsbDeviceService();
   final UsbNetworkService _usbNetworkService = UsbNetworkService();
-  final TransportDiagnosticsService _transportDiagnosticsService = TransportDiagnosticsService();
+  final TransportDiagnosticsService _transportDiagnosticsService =
+      TransportDiagnosticsService();
   MenuSection _selectedSection = menuSections.first;
   late MadeyeControllerState _controllerState;
   String _commandStatus = 'Command channel ready';
@@ -245,7 +248,9 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _cameraOn() async {
@@ -320,7 +325,9 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                 label: _controllerState.listenerRunning
                     ? 'Listening ${_controllerState.eventPort}'
                     : 'Listener Offline',
-                color: _controllerState.listenerRunning ? AppColors.blue : AppColors.red,
+                color: _controllerState.listenerRunning
+                    ? AppColors.blue
+                    : AppColors.red,
               ),
             ),
           ),
@@ -347,10 +354,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
               const SizedBox(height: 8),
               Text(
                 _selectedSection.subtitle,
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: AppColors.subtext,
-                ),
+                style: const TextStyle(fontSize: 15, color: AppColors.subtext),
               ),
               const SizedBox(height: 16),
               Wrap(
@@ -363,7 +367,9 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                   ),
                   _InfoChip(
                     label: 'Event Port ${_controllerState.eventPort}',
-                    color: _controllerState.listenerRunning ? AppColors.blue : AppColors.amber,
+                    color: _controllerState.listenerRunning
+                        ? AppColors.blue
+                        : AppColors.amber,
                   ),
                   _InfoChip(
                     label: 'Command Port ${_controllerState.commandPort}',
@@ -383,6 +389,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     section: _selectedSection,
                     controllerState: _controllerState,
                     commandClient: _commandClient,
+                    rndisProbeService: _rndisProbeService,
                     usbDeviceService: _usbDeviceService,
                     usbNetworkService: _usbNetworkService,
                     transportDiagnosticsService: _transportDiagnosticsService,
@@ -450,10 +457,7 @@ class ControlDrawer extends StatelessWidget {
               padding: EdgeInsets.fromLTRB(20, 0, 20, 16),
               child: Text(
                 'Choose a controller section.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.subtext,
-                ),
+                style: TextStyle(fontSize: 14, color: AppColors.subtext),
               ),
             ),
             const Divider(height: 1, color: AppColors.border),
@@ -475,9 +479,7 @@ class ControlDrawer extends StatelessWidget {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                         side: BorderSide(
-                          color: selected
-                              ? AppColors.blue
-                              : AppColors.border,
+                          color: selected ? AppColors.blue : AppColors.border,
                         ),
                       ),
                       title: Text(
@@ -509,6 +511,7 @@ class _SectionContent extends StatelessWidget {
     required this.section,
     required this.controllerState,
     required this.commandClient,
+    required this.rndisProbeService,
     required this.usbDeviceService,
     required this.usbNetworkService,
     required this.transportDiagnosticsService,
@@ -528,6 +531,7 @@ class _SectionContent extends StatelessWidget {
   final MenuSection section;
   final MadeyeControllerState controllerState;
   final MadeyeCommandClient commandClient;
+  final RndisProbeService rndisProbeService;
   final UsbDeviceService usbDeviceService;
   final UsbNetworkService usbNetworkService;
   final TransportDiagnosticsService transportDiagnosticsService;
@@ -535,7 +539,8 @@ class _SectionContent extends StatelessWidget {
   final VoidCallback onStartListener;
   final VoidCallback onStopListener;
   final VoidCallback onRestartListener;
-  final void Function(MadeyeControllerState Function(MadeyeControllerState)) onStateChanged;
+  final void Function(MadeyeControllerState Function(MadeyeControllerState))
+  onStateChanged;
   final Future<Uint8List> Function(String path) onReadFileBytes;
   final Future<String> Function(String path) onReadFileText;
   final int Function(Map<String, String>, String) onParseIntField;
@@ -638,7 +643,10 @@ class _SectionContent extends StatelessWidget {
                 threshold: onParseDoubleField(values, 'Threshold'),
                 attempts: onParseIntField(values, 'Attempts'),
                 liveness: onParseIntField(values, 'Liveness'),
-                livenessThreshold: onParseDoubleField(values, 'Liveness Threshold'),
+                livenessThreshold: onParseDoubleField(
+                  values,
+                  'Liveness Threshold',
+                ),
                 faceMinimum: onParseIntField(values, 'Face Minimum'),
                 faceSize: onParseIntField(values, 'Face Size'),
               ),
@@ -679,7 +687,9 @@ class _SectionContent extends StatelessWidget {
               controllerState.commandPort,
               result,
             );
-            onStateChanged((state) => state.copyWith(cameraHost: result.address));
+            onStateChanged(
+              (state) => state.copyWith(cameraHost: result.address),
+            );
             return 'Network settings updated';
           },
         );
@@ -734,12 +744,11 @@ class _SectionContent extends StatelessWidget {
           },
         );
       case 'USB Devices':
-        return _UsbDevicesPanel(
-          usbDeviceService: usbDeviceService,
-        );
+        return _UsbDevicesPanel(usbDeviceService: usbDeviceService);
       case 'USB Descriptor':
         return _UsbDescriptorPanel(
           usbDeviceService: usbDeviceService,
+          rndisProbeService: rndisProbeService,
         );
       case 'USB Network':
         return _UsbNetworkPanel(
@@ -793,9 +802,7 @@ class _SectionContent extends StatelessWidget {
         return _ActionFormPanel(
           icon: Icons.person_remove_alt_1_rounded,
           title: 'Delete User',
-          fields: const [
-            _FieldSpec('User ID', '1001'),
-          ],
+          fields: const [_FieldSpec('User ID', '1001')],
           actions: const ['Delete User', 'Delete All Users'],
           onAction: {
             'Delete User': (values) async {
@@ -827,7 +834,10 @@ class _SectionContent extends StatelessWidget {
           icon: Icons.storage_rounded,
           title: 'Database Tools',
           fields: const [
-            _FieldSpec('Database File', '/storage/emulated/0/camera_database.sql'),
+            _FieldSpec(
+              'Database File',
+              '/storage/emulated/0/camera_database.sql',
+            ),
             _FieldSpec('MD5 File', '/storage/emulated/0/camera_database.md5'),
           ],
           actions: const ['Download Database', 'Upload Database'],
@@ -841,15 +851,17 @@ class _SectionContent extends StatelessWidget {
               final md5File = File(values['MD5 File']?.trim() ?? '');
               await databaseFile.parent.create(recursive: true);
               await md5File.parent.create(recursive: true);
-              await databaseFile
-                  .writeAsBytes(result.database);
-              await md5File
-                  .writeAsString(result.md5);
+              await databaseFile.writeAsBytes(result.database);
+              await md5File.writeAsString(result.md5);
               return 'Database downloaded';
             },
             'Upload Database': (values) async {
-              final database = await onReadFileBytes(values['Database File']?.trim() ?? '');
-              final md5 = await onReadFileText(values['MD5 File']?.trim() ?? '');
+              final database = await onReadFileBytes(
+                values['Database File']?.trim() ?? '',
+              );
+              final md5 = await onReadFileText(
+                values['MD5 File']?.trim() ?? '',
+              );
               await commandClient.databaseSet(
                 controllerState.cameraHost,
                 controllerState.commandPort,
@@ -865,8 +877,14 @@ class _SectionContent extends StatelessWidget {
           icon: Icons.system_update_alt_rounded,
           title: 'Firmware Update',
           fields: const [
-            _FieldSpec('Firmware Zip', '/storage/emulated/0/FortressCameraController.zip'),
-            _FieldSpec('MD5 File', '/storage/emulated/0/FortressCameraController.md5'),
+            _FieldSpec(
+              'Firmware Zip',
+              '/storage/emulated/0/FortressCameraController.zip',
+            ),
+            _FieldSpec(
+              'MD5 File',
+              '/storage/emulated/0/FortressCameraController.md5',
+            ),
           ],
           actions: const ['Choose Firmware', 'Upload Firmware'],
           onAction: {
@@ -880,8 +898,12 @@ class _SectionContent extends StatelessWidget {
               return 'Firmware ready: $length bytes';
             },
             'Upload Firmware': (values) async {
-              final firmware = await onReadFileBytes(values['Firmware Zip']?.trim() ?? '');
-              final md5 = await onReadFileText(values['MD5 File']?.trim() ?? '');
+              final firmware = await onReadFileBytes(
+                values['Firmware Zip']?.trim() ?? '',
+              );
+              final md5 = await onReadFileText(
+                values['MD5 File']?.trim() ?? '',
+              );
               await commandClient.firmwareUpdate(
                 controllerState.cameraHost,
                 controllerState.commandPort,
@@ -932,11 +954,7 @@ class _CameraViewerPanel extends StatelessWidget {
             ),
             child: Stack(
               children: [
-                const Positioned(
-                  top: 16,
-                  left: 16,
-                  child: _ViewerTag(),
-                ),
+                const Positioned(top: 16, left: 16, child: _ViewerTag()),
                 if (frame != null)
                   Center(
                     child: ClipRRect(
@@ -1068,16 +1086,22 @@ class _LiveEventsPanel extends StatelessWidget {
         _ConsolePanel(
           icon: Icons.receipt_long_rounded,
           title: 'Latest Events',
-          lines: state.logs.map((entry) => entry.formatted).toList(growable: false),
+          lines: state.logs
+              .map((entry) => entry.formatted)
+              .toList(growable: false),
         ),
         const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: state.listenerRunning ? onRestartListener : onStartListener,
+                onPressed: state.listenerRunning
+                    ? onRestartListener
+                    : onStartListener,
                 icon: Icon(
-                  state.listenerRunning ? Icons.restart_alt_rounded : Icons.play_arrow_rounded,
+                  state.listenerRunning
+                      ? Icons.restart_alt_rounded
+                      : Icons.play_arrow_rounded,
                 ),
                 label: Text(
                   state.listenerRunning ? 'Restart Listener' : 'Start Listener',
@@ -1089,7 +1113,9 @@ class _LiveEventsPanel extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: state.listenerRunning ? onStopListener : onOpenMenu,
                 icon: Icon(
-                  state.listenerRunning ? Icons.stop_circle_outlined : Icons.menu_open_rounded,
+                  state.listenerRunning
+                      ? Icons.stop_circle_outlined
+                      : Icons.menu_open_rounded,
                 ),
                 label: Text(
                   state.listenerRunning ? 'Stop Listener' : 'Open Sections',
@@ -1194,10 +1220,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
             const SizedBox(height: 14),
             Text(
               _status!,
-              style: const TextStyle(
-                color: AppColors.subtext,
-                fontSize: 13,
-              ),
+              style: const TextStyle(color: AppColors.subtext, fontSize: 13),
             ),
           ],
           const SizedBox(height: 16),
@@ -1225,9 +1248,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
 }
 
 class _UsbDevicesPanel extends StatefulWidget {
-  const _UsbDevicesPanel({
-    required this.usbDeviceService,
-  });
+  const _UsbDevicesPanel({required this.usbDeviceService});
 
   final UsbDeviceService usbDeviceService;
 
@@ -1282,10 +1303,7 @@ class _UsbDevicesPanelState extends State<_UsbDevicesPanel> {
         children: [
           Text(
             _status,
-            style: const TextStyle(
-              color: AppColors.subtext,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
           ),
           const SizedBox(height: 14),
           if (_devices.isEmpty)
@@ -1299,10 +1317,7 @@ class _UsbDevicesPanelState extends State<_UsbDevicesPanel> {
               ),
               child: const Text(
                 'No devices have been enumerated yet.',
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: AppColors.text, fontSize: 14),
               ),
             )
           else
@@ -1321,7 +1336,9 @@ class _UsbDevicesPanelState extends State<_UsbDevicesPanel> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        device.productName == '-' ? device.name : device.productName,
+                        device.productName == '-'
+                            ? device.name
+                            : device.productName,
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
@@ -1379,9 +1396,11 @@ class _UsbDevicesPanelState extends State<_UsbDevicesPanel> {
 class _UsbDescriptorPanel extends StatefulWidget {
   const _UsbDescriptorPanel({
     required this.usbDeviceService,
+    required this.rndisProbeService,
   });
 
   final UsbDeviceService usbDeviceService;
+  final RndisProbeService rndisProbeService;
 
   @override
   State<_UsbDescriptorPanel> createState() => _UsbDescriptorPanelState();
@@ -1392,6 +1411,9 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
   String _status = 'Tap refresh to inspect USB descriptors.';
   bool _loading = false;
   String? _selectedDeviceName;
+  String _probeStatus =
+      'Tap Probe RNDIS on the camera device to test the USB transport.';
+  Map<String, dynamic> _probeDetails = const {};
 
   @override
   void initState() {
@@ -1446,7 +1468,9 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
       _status = 'Requesting permission for ${device.name}...';
     });
     try {
-      final message = await widget.usbDeviceService.requestPermission(device.name);
+      final message = await widget.usbDeviceService.requestPermission(
+        device.name,
+      );
       await _refresh();
       setState(() {
         _status = message;
@@ -1455,6 +1479,33 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
     } catch (error) {
       setState(() {
         _status = 'Permission request failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _probeRndis(UsbDeviceInfo device) async {
+    setState(() {
+      _loading = true;
+      _probeStatus = 'Probing RNDIS transport for ${device.name}...';
+      _probeDetails = const {};
+    });
+    try {
+      final details = await widget.rndisProbeService.probe(device.name);
+      setState(() {
+        _probeDetails = details;
+        _probeStatus = details.isEmpty
+            ? 'RNDIS probe returned no details.'
+            : 'RNDIS probe completed for ${device.name}.';
+      });
+    } catch (error) {
+      setState(() {
+        _probeStatus = 'RNDIS probe failed: $error';
       });
     } finally {
       if (mounted) {
@@ -1476,10 +1527,12 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
         children: [
           Text(
             _status,
-            style: const TextStyle(
-              color: AppColors.subtext,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _probeStatus,
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
           ),
           const SizedBox(height: 14),
           if (_devices.isEmpty)
@@ -1493,10 +1546,7 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
               ),
               child: const Text(
                 'No USB descriptors available yet.',
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: AppColors.text, fontSize: 14),
               ),
             )
           else
@@ -1507,10 +1557,14 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: _selectedDeviceName == device.name ? AppColors.blueSoft : AppColors.surfaceAlt,
+                    color: _selectedDeviceName == device.name
+                        ? AppColors.blueSoft
+                        : AppColors.surfaceAlt,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: _selectedDeviceName == device.name ? AppColors.blue : AppColors.border,
+                      color: _selectedDeviceName == device.name
+                          ? AppColors.blue
+                          : AppColors.border,
                     ),
                   ),
                   child: InkWell(
@@ -1526,7 +1580,9 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
                           children: [
                             Expanded(
                               child: Text(
-                                device.productName == '-' ? device.name : device.productName,
+                                device.productName == '-'
+                                    ? device.name
+                                    : device.productName,
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800,
@@ -1535,8 +1591,12 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
                               ),
                             ),
                             _InfoChip(
-                              label: device.hasPermission ? 'Permission Granted' : 'No Permission',
-                              color: device.hasPermission ? AppColors.teal : AppColors.red,
+                              label: device.hasPermission
+                                  ? 'Permission Granted'
+                                  : 'No Permission',
+                              color: device.hasPermission
+                                  ? AppColors.teal
+                                  : AppColors.red,
                             ),
                           ],
                         ),
@@ -1629,12 +1689,55 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
                         const SizedBox(height: 12),
                         Align(
                           alignment: Alignment.centerLeft,
-                          child: FilledButton.icon(
-                            onPressed: _loading ? null : () => _requestPermission(device),
-                            icon: const Icon(Icons.key_rounded),
-                            label: Text(device.hasPermission ? 'Permission Already Granted' : 'Request Permission'),
+                          child: Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: _loading
+                                    ? null
+                                    : () => _requestPermission(device),
+                                icon: const Icon(Icons.key_rounded),
+                                label: Text(
+                                  device.hasPermission
+                                      ? 'Permission Already Granted'
+                                      : 'Request Permission',
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: _loading
+                                    ? null
+                                    : () => _probeRndis(device),
+                                icon: const Icon(Icons.usb_rounded),
+                                label: const Text('Probe RNDIS'),
+                              ),
+                            ],
                           ),
                         ),
+                        if (_probeDetails.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: SelectableText(
+                              _probeDetails.entries
+                                  .map(
+                                    (entry) => '${entry.key}: ${entry.value}',
+                                  )
+                                  .join('\n'),
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                color: AppColors.text,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1645,10 +1748,7 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
             const SizedBox(height: 10),
             Text(
               'Selected device: ${selected.name}',
-              style: const TextStyle(
-                color: AppColors.subtext,
-                fontSize: 13,
-              ),
+              style: const TextStyle(color: AppColors.subtext, fontSize: 13),
             ),
           ],
           const SizedBox(height: 16),
@@ -1724,13 +1824,16 @@ class _UsbNetworkPanelState extends State<_UsbNetworkPanel> {
       _status = 'Probing camera host ${widget.cameraHost}...';
     });
     try {
-      final eventOpen = await widget.usbNetworkService.probePort(widget.cameraHost, widget.eventPort);
-      final commandOpen = await widget.usbNetworkService.probePort(widget.cameraHost, widget.commandPort);
+      final eventOpen = await widget.usbNetworkService.probePort(
+        widget.cameraHost,
+        widget.eventPort,
+      );
+      final commandOpen = await widget.usbNetworkService.probePort(
+        widget.cameraHost,
+        widget.commandPort,
+      );
       setState(() {
-        _probeResults = {
-          'event': eventOpen,
-          'command': commandOpen,
-        };
+        _probeResults = {'event': eventOpen, 'command': commandOpen};
         _status = eventOpen || commandOpen
             ? 'Camera host responded on ${eventOpen ? 'event' : ''}${eventOpen && commandOpen ? ' and ' : ''}${commandOpen ? 'command' : ''} port.'
             : 'Camera host did not respond on ${widget.cameraHost}.';
@@ -1758,10 +1861,7 @@ class _UsbNetworkPanelState extends State<_UsbNetworkPanel> {
         children: [
           Text(
             _status,
-            style: const TextStyle(
-              color: AppColors.subtext,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
           ),
           const SizedBox(height: 14),
           if (_interfaces.isEmpty)
@@ -1775,10 +1875,7 @@ class _UsbNetworkPanelState extends State<_UsbNetworkPanel> {
               ),
               child: const Text(
                 'No IPv4 interfaces are active right now.',
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: AppColors.text, fontSize: 14),
               ),
             )
           else
@@ -1820,10 +1917,7 @@ class _UsbNetworkPanelState extends State<_UsbNetworkPanel> {
           const SizedBox(height: 8),
           Text(
             'Event port: ${widget.eventPort}  Command port: ${widget.commandPort}',
-            style: const TextStyle(
-              color: AppColors.subtext,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
           ),
           if (_probeResults.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -1874,13 +1968,16 @@ class _TransportDiagnosticsPanel extends StatefulWidget {
   final String cameraHost;
   final int eventPort;
   final int commandPort;
-  final void Function(MadeyeControllerState Function(MadeyeControllerState)) onStateChanged;
+  final void Function(MadeyeControllerState Function(MadeyeControllerState))
+  onStateChanged;
 
   @override
-  State<_TransportDiagnosticsPanel> createState() => _TransportDiagnosticsPanelState();
+  State<_TransportDiagnosticsPanel> createState() =>
+      _TransportDiagnosticsPanelState();
 }
 
-class _TransportDiagnosticsPanelState extends State<_TransportDiagnosticsPanel> {
+class _TransportDiagnosticsPanelState
+    extends State<_TransportDiagnosticsPanel> {
   List<TransportNetworkInfo> _networks = const [];
   String _status = 'Tap refresh to inspect transport links.';
   bool _loading = false;
@@ -1949,8 +2046,14 @@ class _TransportDiagnosticsPanelState extends State<_TransportDiagnosticsPanel> 
     try {
       final candidates = _candidateHosts();
       for (final host in candidates) {
-        final eventOpen = await widget.usbNetworkService.probePort(host, widget.eventPort);
-        final commandOpen = await widget.usbNetworkService.probePort(host, widget.commandPort);
+        final eventOpen = await widget.usbNetworkService.probePort(
+          host,
+          widget.eventPort,
+        );
+        final commandOpen = await widget.usbNetworkService.probePort(
+          host,
+          widget.commandPort,
+        );
         _probes.add(
           '$host -> event:${eventOpen ? 'open' : 'closed'} command:${commandOpen ? 'open' : 'closed'}',
         );
@@ -2016,21 +2119,33 @@ class _TransportDiagnosticsPanelState extends State<_TransportDiagnosticsPanel> 
                           ),
                         ),
                         const SizedBox(width: 8),
-                        _InfoChip(label: network.transportLabel, color: AppColors.blue),
+                        _InfoChip(
+                          label: network.transportLabel,
+                          color: AppColors.blue,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Addresses: ${network.addresses.isEmpty ? '-' : network.addresses.join(', ')}',
-                      style: const TextStyle(fontSize: 13, color: AppColors.subtext),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.subtext,
+                      ),
                     ),
                     Text(
                       'Routes: ${network.routes.isEmpty ? '-' : network.routes.join(' | ')}',
-                      style: const TextStyle(fontSize: 13, color: AppColors.subtext),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.subtext,
+                      ),
                     ),
                     Text(
                       'DNS: ${network.dnsServers.isEmpty ? '-' : network.dnsServers.join(', ')}',
-                      style: const TextStyle(fontSize: 13, color: AppColors.subtext),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.subtext,
+                      ),
                     ),
                   ],
                 ),
@@ -2049,7 +2164,11 @@ class _TransportDiagnosticsPanelState extends State<_TransportDiagnosticsPanel> 
               ),
               child: Text(
                 _probes.join('\n'),
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 13, color: AppColors.text),
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: AppColors.text,
+                ),
               ),
             ),
           ],
@@ -2158,10 +2277,7 @@ class _ActionFormPanelState extends State<_ActionFormPanel> {
             const SizedBox(height: 14),
             Text(
               _status!,
-              style: const TextStyle(
-                color: AppColors.subtext,
-                fontSize: 13,
-              ),
+              style: const TextStyle(color: AppColors.subtext, fontSize: 13),
             ),
           ],
           const SizedBox(height: 16),
@@ -2259,10 +2375,7 @@ class _ListUsersPanelState extends State<_ListUsersPanel> {
           const SizedBox(height: 14),
           Text(
             _status,
-            style: const TextStyle(
-              color: AppColors.subtext,
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: AppColors.subtext, fontSize: 13),
           ),
           const SizedBox(height: 16),
           FilledButton(
@@ -2318,10 +2431,7 @@ class _ConsolePanel extends StatelessWidget {
 }
 
 class _FieldGrid extends StatelessWidget {
-  const _FieldGrid({
-    required this.fields,
-    required this.controllers,
-  });
+  const _FieldGrid({required this.fields, required this.controllers});
 
   final List<_FieldSpec> fields;
   final List<TextEditingController> controllers;
@@ -2400,10 +2510,7 @@ class _PanelShell extends StatelessWidget {
 }
 
 class _MetricRow extends StatelessWidget {
-  const _MetricRow({
-    required this.label,
-    required this.value,
-  });
+  const _MetricRow({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -2417,10 +2524,7 @@ class _MetricRow extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
-                fontSize: 14,
-                color: AppColors.subtext,
-              ),
+              style: const TextStyle(fontSize: 14, color: AppColors.subtext),
             ),
           ),
           Text(
@@ -2438,10 +2542,7 @@ class _MetricRow extends StatelessWidget {
 }
 
 class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({
-    required this.label,
-    required this.color,
-  });
+  const _StatusBadge({required this.label, required this.color});
 
   final String label;
   final Color color;
@@ -2499,7 +2600,10 @@ class _CommandStatusStrip extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.precision_manufacturing_rounded, color: AppColors.blue),
+          const Icon(
+            Icons.precision_manufacturing_rounded,
+            color: AppColors.blue,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -2528,10 +2632,7 @@ class _CommandStatusStrip extends StatelessWidget {
           Text(
             timestamp,
             textAlign: TextAlign.end,
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.subtext,
-            ),
+            style: const TextStyle(fontSize: 12, color: AppColors.subtext),
           ),
         ],
       ),
@@ -2540,10 +2641,7 @@ class _CommandStatusStrip extends StatelessWidget {
 }
 
 class _InfoChip extends StatelessWidget {
-  const _InfoChip({
-    required this.label,
-    required this.color,
-  });
+  const _InfoChip({required this.label, required this.color});
 
   final String label;
   final Color color;
