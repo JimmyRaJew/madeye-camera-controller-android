@@ -206,6 +206,37 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     return File(path).readAsString();
   }
 
+  Future<void> _showSnack(String message) async {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _cameraOn() async {
+    try {
+      await _commandClient.cameraOn(
+        _controllerState.cameraHost,
+        _controllerState.commandPort,
+      );
+      await _showSnack('Camera on command sent');
+    } catch (error) {
+      await _showSnack('Camera on failed: $error');
+    }
+  }
+
+  Future<void> _cameraOff() async {
+    try {
+      await _commandClient.cameraOff(
+        _controllerState.cameraHost,
+        _controllerState.commandPort,
+      );
+      await _showSnack('Camera off command sent');
+    } catch (error) {
+      await _showSnack('Camera off failed: $error');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -327,6 +358,8 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     onReadFileText: _readFileText,
                     onParseIntField: _parseIntField,
                     onParseDoubleField: _parseDoubleField,
+                    onCameraOn: _cameraOn,
+                    onCameraOff: _cameraOff,
                   ),
                 ),
               ),
@@ -438,6 +471,8 @@ class _SectionContent extends StatelessWidget {
     required this.onReadFileText,
     required this.onParseIntField,
     required this.onParseDoubleField,
+    required this.onCameraOn,
+    required this.onCameraOff,
   });
 
   final MenuSection section;
@@ -452,6 +487,8 @@ class _SectionContent extends StatelessWidget {
   final Future<String> Function(String path) onReadFileText;
   final int Function(Map<String, String>, String) onParseIntField;
   final double Function(Map<String, String>, String) onParseDoubleField;
+  final Future<void> Function() onCameraOn;
+  final Future<void> Function() onCameraOff;
 
   @override
   Widget build(BuildContext context) {
@@ -460,6 +497,8 @@ class _SectionContent extends StatelessWidget {
         return _CameraViewerPanel(
           state: controllerState,
           onOpenMenu: onOpenMenu,
+          onCameraOn: onCameraOn,
+          onCameraOff: onCameraOff,
         );
       case 'Live Events':
         return _LiveEventsPanel(
@@ -786,10 +825,14 @@ class _CameraViewerPanel extends StatelessWidget {
   const _CameraViewerPanel({
     required this.state,
     required this.onOpenMenu,
+    required this.onCameraOn,
+    required this.onCameraOff,
   });
 
   final MadeyeControllerState state;
   final VoidCallback onOpenMenu;
+  final Future<void> Function() onCameraOn;
+  final Future<void> Function() onCameraOff;
 
   @override
   Widget build(BuildContext context) {
@@ -881,13 +924,27 @@ class _CameraViewerPanel extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: onOpenMenu,
-            icon: const Icon(Icons.menu_open_rounded),
-            label: const Text('Open sections'),
-          ),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          alignment: WrapAlignment.start,
+          children: [
+            TextButton.icon(
+              onPressed: onOpenMenu,
+              icon: const Icon(Icons.menu_open_rounded),
+              label: const Text('Open sections'),
+            ),
+            FilledButton.icon(
+              onPressed: () async => onCameraOn(),
+              icon: const Icon(Icons.power_settings_new_rounded),
+              label: const Text('Camera On'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () async => onCameraOff(),
+              icon: const Icon(Icons.power_off_rounded),
+              label: const Text('Camera Off'),
+            ),
+          ],
         ),
       ],
     );
