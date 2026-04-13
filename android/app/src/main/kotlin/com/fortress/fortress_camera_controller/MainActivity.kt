@@ -101,6 +101,7 @@ class MainActivity : FlutterActivity() {
                     val usbInterface = device.getInterface(index)
                     mapOf(
                         "id" to usbInterface.id,
+                        "alternateSetting" to usbInterface.alternateSetting,
                         "interfaceClass" to usbInterface.interfaceClass,
                         "interfaceSubclass" to usbInterface.interfaceSubclass,
                         "interfaceProtocol" to usbInterface.interfaceProtocol,
@@ -302,6 +303,26 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun setInterfaceAlternateSetting(
+        connection: UsbDeviceConnection,
+        intf: android.hardware.usb.UsbInterface,
+    ) {
+        val requested = connection.controlTransfer(
+            0x01,
+            0x0B,
+            intf.alternateSetting,
+            intf.id,
+            null,
+            0,
+            2000,
+        )
+        if (requested < 0) {
+            throw IllegalStateException(
+                "Unable to select alternate setting ${intf.alternateSetting} for interface ${intf.id}",
+            )
+        }
+    }
+
     private fun probeRndisPair(
         device: UsbDevice,
         commInterface: android.hardware.usb.UsbInterface,
@@ -318,6 +339,8 @@ class MainActivity : FlutterActivity() {
             if (!connection.claimInterface(dataInterface, true)) {
                 throw IllegalStateException("Unable to claim data interface ${dataInterface.id}")
             }
+            setInterfaceAlternateSetting(connection, commInterface)
+            setInterfaceAlternateSetting(connection, dataInterface)
 
             val interruptEndpoint = findInterruptInEndpoint(commInterface)
                 ?: throw IllegalStateException("Communication interface ${commInterface.id} has no interrupt endpoint")
