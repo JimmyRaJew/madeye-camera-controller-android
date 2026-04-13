@@ -182,12 +182,21 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   final MadeyeCommandClient _commandClient = MadeyeCommandClient();
   MenuSection _selectedSection = menuSections.first;
   late MadeyeControllerState _controllerState;
+  String _commandStatus = 'Command channel ready';
+  DateTime? _lastCommandAt;
 
   void _selectMenu(MenuSection section) {
     setState(() {
       _selectedSection = section;
     });
     Navigator.of(context).pop();
+  }
+
+  void _setCommandStatus(String message) {
+    setState(() {
+      _commandStatus = message;
+      _lastCommandAt = DateTime.now();
+    });
   }
 
   int _parseIntField(Map<String, String> values, String key) {
@@ -219,8 +228,10 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
         _controllerState.cameraHost,
         _controllerState.commandPort,
       );
+      _setCommandStatus('Camera on sent successfully');
       await _showSnack('Camera on command sent');
     } catch (error) {
+      _setCommandStatus('Camera on failed');
       await _showSnack('Camera on failed: $error');
     }
   }
@@ -231,8 +242,10 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
         _controllerState.cameraHost,
         _controllerState.commandPort,
       );
+      _setCommandStatus('Camera off sent successfully');
       await _showSnack('Camera off command sent');
     } catch (error) {
+      _setCommandStatus('Camera off failed');
       await _showSnack('Camera off failed: $error');
     }
   }
@@ -331,6 +344,11 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     color: AppColors.red,
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              _CommandStatusStrip(
+                status: _commandStatus,
+                lastCommandAt: _lastCommandAt,
               ),
               const SizedBox(height: 20),
               Expanded(
@@ -1530,6 +1548,71 @@ class _StatusBadge extends StatelessWidget {
               fontSize: 13,
               fontWeight: FontWeight.w700,
               color: AppColors.text,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommandStatusStrip extends StatelessWidget {
+  const _CommandStatusStrip({
+    required this.status,
+    required this.lastCommandAt,
+  });
+
+  final String status;
+  final DateTime? lastCommandAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final timestamp = lastCommandAt == null
+        ? 'No commands sent yet'
+        : 'Last command at ${lastCommandAt!.hour.toString().padLeft(2, '0')}:${lastCommandAt!.minute.toString().padLeft(2, '0')}:${lastCommandAt!.second.toString().padLeft(2, '0')}';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.precision_manufacturing_rounded, color: AppColors.blue),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Command Status',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.subtext,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  status,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.text,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            timestamp,
+            textAlign: TextAlign.end,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.subtext,
             ),
           ),
         ],
