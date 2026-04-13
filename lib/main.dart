@@ -152,8 +152,9 @@ const menuSections = [
     icon: Icons.usb_rounded,
   ),
   MenuSection(
-    title: 'USB Descriptor',
-    subtitle: 'Inspect device interfaces, endpoints, and permissions.',
+    title: 'USB Ethernet / ECM',
+    subtitle:
+        'Inspect USB Ethernet-style interfaces, endpoints, and permissions.',
     icon: Icons.developer_board_rounded,
   ),
   MenuSection(
@@ -745,7 +746,7 @@ class _SectionContent extends StatelessWidget {
         );
       case 'USB Devices':
         return _UsbDevicesPanel(usbDeviceService: usbDeviceService);
-      case 'USB Descriptor':
+      case 'USB Ethernet / ECM':
         return _UsbDescriptorPanel(
           usbDeviceService: usbDeviceService,
           rndisProbeService: rndisProbeService,
@@ -1412,8 +1413,8 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
   bool _loading = false;
   String? _selectedDeviceName;
   String _probeStatus =
-      'Tap Probe RNDIS on the camera device to test the USB transport.';
-  String _probeSummary = 'No RNDIS probe has been run yet.';
+      'Tap Probe USB Ethernet on the camera device to test the USB transport.';
+  String _probeSummary = 'No USB Ethernet probe has been run yet.';
   Map<String, dynamic> _probeDetails = const {};
 
   @override
@@ -1493,7 +1494,7 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
   Future<void> _probeRndis(UsbDeviceInfo device) async {
     setState(() {
       _loading = true;
-      _probeStatus = 'Probing RNDIS transport for ${device.name}...';
+      _probeStatus = 'Probing USB Ethernet transport for ${device.name}...';
       _probeSummary = 'Running USB transport check...';
       _probeDetails = const {};
     });
@@ -1502,8 +1503,8 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
       setState(() {
         _probeDetails = details;
         _probeStatus = details.isEmpty
-            ? 'RNDIS probe returned no details.'
-            : 'RNDIS probe completed for ${device.name}.';
+            ? 'USB Ethernet probe returned no details.'
+            : 'USB Ethernet probe completed for ${device.name}.';
         _probeSummary = details.isEmpty
             ? 'Probe completed, but the camera did not return any transport details.'
             : details.entries
@@ -1515,21 +1516,21 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
           SnackBar(
             content: Text(
               details.isEmpty
-                  ? 'RNDIS probe completed with no details.'
-                  : 'RNDIS probe completed for ${device.productName == '-' ? device.name : device.productName}.',
+                  ? 'USB Ethernet probe completed with no details.'
+                  : 'USB Ethernet probe completed for ${device.productName == '-' ? device.name : device.productName}.',
             ),
           ),
         );
       }
     } catch (error) {
       setState(() {
-        _probeStatus = 'RNDIS probe failed: $error';
+        _probeStatus = 'USB Ethernet probe failed: $error';
         _probeSummary = 'Probe failed. See the status text above for details.';
       });
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('RNDIS probe failed: $error')));
+        ).showSnackBar(SnackBar(content: Text('USB Ethernet probe failed: $error')));
       }
     } finally {
       if (mounted) {
@@ -1544,7 +1545,7 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
   Widget build(BuildContext context) {
     final selected = _selectedDevice;
     return _PanelShell(
-      title: 'USB Descriptor',
+      title: 'USB Ethernet / ECM',
       icon: Icons.developer_board_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1753,7 +1754,7 @@ class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
                                     ? null
                                     : () => _probeRndis(device),
                                 icon: const Icon(Icons.usb_rounded),
-                                label: const Text('Probe RNDIS'),
+                                label: const Text('Probe USB Ethernet'),
                               ),
                             ],
                           ),

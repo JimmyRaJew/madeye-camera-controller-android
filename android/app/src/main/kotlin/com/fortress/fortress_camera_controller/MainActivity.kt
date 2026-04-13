@@ -174,24 +174,24 @@ class MainActivity : FlutterActivity() {
 
     private fun probeRndis(deviceName: String?, result: MethodChannel.Result) {
         if (deviceName.isNullOrBlank()) {
-            result.error("rndis_missing", "Missing USB device name", null)
+            result.error("usb_eth_missing", "Missing USB device name", null)
             return
         }
         val usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
         val device = usbManager.deviceList[deviceName]
         if (device == null) {
-            result.error("rndis_missing_device", "USB device not found: $deviceName", null)
+            result.error("usb_eth_missing_device", "USB device not found: $deviceName", null)
             return
         }
         if (!usbManager.hasPermission(device)) {
-            result.error("rndis_no_permission", "USB permission has not been granted for $deviceName", null)
+            result.error("usb_eth_no_permission", "USB permission has not been granted for $deviceName", null)
             return
         }
 
         val commInterfaces = findRndisCommunicationInterfaces(device)
         val dataInterfaces = findRndisDataInterfaces(device)
         if (commInterfaces.isEmpty() || dataInterfaces.isEmpty()) {
-            result.error("rndis_missing_interfaces", "Could not locate RNDIS communication/data interfaces", null)
+            result.error("usb_eth_missing_interfaces", "Could not locate USB Ethernet communication/data interfaces", null)
             return
         }
 
@@ -215,9 +215,9 @@ class MainActivity : FlutterActivity() {
         }
 
         result.error(
-            "rndis_probe_failed",
+            "usb_eth_probe_failed",
             buildString {
-                append("All RNDIS-style interface pairs failed.\n")
+                append("All USB Ethernet-style interface pairs failed.\n")
                 append(attempts.joinToString("\n"))
             },
             null,
@@ -326,48 +326,158 @@ class MainActivity : FlutterActivity() {
             val bulkOut = findBulkOutEndpoint(dataInterface)
                 ?: throw IllegalStateException("Data interface ${dataInterface.id} has no bulk OUT endpoint")
 
-            val initializeRequestId = 1
-            val initializeRequest = buildRndisInitializeMessage(initializeRequestId, 16384)
-            val initTransferred = sendRndisControlMessage(connection, commInterface.id, initializeRequest)
-            if (initTransferred < 0) {
-                throw IllegalStateException("Failed to send RNDIS initialize message on interface ${commInterface.id}")
+            val attempts = mutableListOf<String>()
+
+            val rndisResult = runCatching {
+                val initializeRequestId = 1
+                val initializeRequest = buildRndisInitializeMessage(initializeRequestId, 16384)
+                val initTransferred = sendRndisControlMessage(connection, commInterface.id, initializeRequest)
+                if (initTransferred < 0) {
+                    throw IllegalStateException("Failed to send USB Ethernet initialize message on interface ${commInterface.id}")
+                }
+
+                waitForRndiSNotification(connection, interruptEndpoint)
+                val initResponseBytes = readRndisResponse(connection, commInterface.id)
+                val initResponse = parseRndisInitializeComplete(initResponseBytes)
+
+                val supportedOids = queryRndisBytes(connection, commInterface.id, 0x00010101, 256)
+                val currentAddress = queryRndisBytes(connection, commInterface.id, 0x01010102, 16)
+                val maxFrameSize = queryRndisBytes(connection, commInterface.id, 0x00010106, 8)
+                val linkStatus = queryRndisBytes(connection, commInterface.id, 0x00010114, 8)
+
+                val packetFilter = 0x0000000f
+                val packetFilterBytes = ByteArray(4)
+                writeInt32LE(packetFilterBytes, 0, packetFilter)
+                val setFilterResponse = setRndisValue(connection, commInterface.id, 0x0001010e, packetFilterBytes)
+                val setFilterOk = parseRndisSetComplete(setFilterResponse)
+
+                mapOf(
+                    "transport" to "RNDIS",
+                    "deviceName" to device.deviceName,
+                    "communicationInterface" to commInterface.id,
+                    "dataInterface" to dataInterface.id,
+                    "interruptEndpoint" to interruptEndpoint.address,
+                    "bulkInEndpoint" to bulkIn.address,
+                    "bulkOutEndpoint" to bulkOut.address,
+                    "initialized" to initResponse.success,
+                    "medium" to initResponse.medium,
+                    "maxTransferSize" to initResponse.maxTransferSize,
+                    "packetAlignmentFactor" to initResponse.packetAlignmentFactor,
+                    "currentAddress" to bytesToHex(currentAddress),
+                    "supportedOids" to bytesToHex(supportedOids),
+                    "maxFrameSize" to bytesToHex(maxFrameSize),
+                    "linkStatus" to bytesToHex(linkStatus),
+                    "packetFilterSet" to setFilterOk,
+                )
             }
 
-            waitForRndiSNotification(connection, interruptEndpoint)
-            val initResponseBytes = readRndisResponse(connection, commInterface.id)
-            val initResponse = parseRndisInitializeComplete(initResponseBytes)
+            if (rndisResult.isSuccess) {
+                return rndisResult.getOrThrow()
+            }
+            attempts.add("RNDIS init -> ${rndisResult.exceptionOrNull()?.message ?: "unknown error"}")
 
-            val supportedOids = queryRndisBytes(connection, commInterface.id, 0x00010101, 256)
-            val currentAddress = queryRndisBytes(connection, commInterface.id, 0x01010102, 16)
-            val maxFrameSize = queryRndisBytes(connection, commInterface.id, 0x00010106, 8)
-            val linkStatus = queryRndisBytes(connection, commInterface.id, 0x00010114, 8)
+            val rawResult = runCatching {
+                probeUsbEthernetRaw(connection, dataInterface, bulkIn, bulkOut)
+            }
+            if (rawResult.isSuccess) {
+                val rawDetails = rawResult.getOrThrow().toMutableMap()
+                rawDetails["transport"] = "USB Ethernet raw"
+                rawDetails["attempts"] = attempts
+                return rawDetails
+            }
+            attempts.add("Raw Ethernet -> ${rawResult.exceptionOrNull()?.message ?: "unknown error"}")
 
-            val packetFilter = 0x0000000f
-            val packetFilterBytes = ByteArray(4)
-            writeInt32LE(packetFilterBytes, 0, packetFilter)
-            val setFilterResponse = setRndisValue(connection, commInterface.id, 0x0001010e, packetFilterBytes)
-            val setFilterOk = parseRndisSetComplete(setFilterResponse)
-
-            return mapOf(
-                "deviceName" to device.deviceName,
-                "communicationInterface" to commInterface.id,
-                "dataInterface" to dataInterface.id,
-                "interruptEndpoint" to interruptEndpoint.address,
-                "bulkInEndpoint" to bulkIn.address,
-                "bulkOutEndpoint" to bulkOut.address,
-                "initialized" to initResponse.success,
-                "medium" to initResponse.medium,
-                "maxTransferSize" to initResponse.maxTransferSize,
-                "packetAlignmentFactor" to initResponse.packetAlignmentFactor,
-                "currentAddress" to bytesToHex(currentAddress),
-                "supportedOids" to bytesToHex(supportedOids),
-                "maxFrameSize" to bytesToHex(maxFrameSize),
-                "linkStatus" to bytesToHex(linkStatus),
-                "packetFilterSet" to setFilterOk,
-            )
+            throw IllegalStateException(attempts.joinToString("; "))
         } finally {
             runCatching { connection.close() }
         }
+    }
+
+    private fun probeUsbEthernetRaw(
+        connection: UsbDeviceConnection,
+        dataInterface: android.hardware.usb.UsbInterface,
+        bulkIn: android.hardware.usb.UsbEndpoint,
+        bulkOut: android.hardware.usb.UsbEndpoint,
+    ): Map<String, Any?> {
+        val sourceMac = byteArrayOf(0x02, 0x12, 0x34, 0x56, 0x78, 0x9a.toByte())
+        val sourceIp = byteArrayOf(192.toByte(), 168.toByte(), 1.toByte(), 250.toByte())
+        val targetIp = byteArrayOf(192.toByte(), 168.toByte(), 1.toByte(), 111.toByte())
+        val request = buildArpRequestFrame(sourceMac, sourceIp, targetIp)
+        val sent = connection.bulkTransfer(bulkOut, request, request.size, 2000)
+        if (sent <= 0) {
+            throw IllegalStateException("Failed to send raw Ethernet ARP request")
+        }
+
+        val buffer = ByteArray(4096)
+        repeat(10) {
+            val bytesRead = connection.bulkTransfer(bulkIn, buffer, buffer.size, 500)
+            if (bytesRead > 0) {
+                val reply = parseEthernetArpReply(buffer, bytesRead, sourceMac, targetIp)
+                if (reply != null) {
+                    return mapOf(
+                        "deviceName" to dataInterface.id,
+                        "sourceMac" to macToString(sourceMac),
+                        "sourceIp" to ipToString(sourceIp),
+                        "cameraMac" to reply,
+                        "bulkInEndpoint" to bulkIn.address,
+                        "bulkOutEndpoint" to bulkOut.address,
+                    )
+                }
+            }
+        }
+        throw IllegalStateException("No ARP reply received from camera")
+    }
+
+    private fun buildArpRequestFrame(sourceMac: ByteArray, sourceIp: ByteArray, targetIp: ByteArray): ByteArray {
+        val frame = ByteArray(60)
+        for (index in 0 until 6) {
+            frame[index] = 0xFF.toByte()
+        }
+        System.arraycopy(sourceMac, 0, frame, 6, 6)
+        frame[12] = 0x08
+        frame[13] = 0x06
+        writeUInt16BE(frame, 14, 1)
+        writeUInt16BE(frame, 16, 0x0800)
+        frame[18] = 6
+        frame[19] = 4
+        writeUInt16BE(frame, 20, 1)
+        System.arraycopy(sourceMac, 0, frame, 22, 6)
+        System.arraycopy(sourceIp, 0, frame, 28, 4)
+        for (index in 32 until 38) {
+            frame[index] = 0x00
+        }
+        System.arraycopy(targetIp, 0, frame, 38, 4)
+        return frame
+    }
+
+    private fun parseEthernetArpReply(
+        buffer: ByteArray,
+        bytesRead: Int,
+        sourceMac: ByteArray,
+        targetIp: ByteArray,
+    ): String? {
+        if (bytesRead < 42) {
+            return null
+        }
+        val ethertype = readUInt16BE(buffer, 12)
+        if (ethertype != 0x0806) {
+            return null
+        }
+        val opcode = readUInt16BE(buffer, 20)
+        if (opcode != 2) {
+            return null
+        }
+        val senderMac = buffer.copyOfRange(22, 28)
+        val senderIp = buffer.copyOfRange(28, 32)
+        val targetMac = buffer.copyOfRange(32, 38)
+        val replyTargetIp = buffer.copyOfRange(38, 42)
+        if (!replyTargetIp.contentEquals(targetIp)) {
+            return null
+        }
+        if (!targetMac.contentEquals(sourceMac)) {
+            return null
+        }
+        return macToString(senderMac) + " from " + ipToString(senderIp)
     }
 
     private fun readRndisResponse(connection: UsbDeviceConnection, interfaceId: Int): ByteArray {
@@ -382,7 +492,7 @@ class MainActivity : FlutterActivity() {
             2000,
         )
         if (bytesRead <= 0) {
-            throw IllegalStateException("No RNDIS response received")
+            throw IllegalStateException("No USB Ethernet response received")
         }
         return buffer.copyOf(bytesRead)
     }
@@ -420,7 +530,7 @@ class MainActivity : FlutterActivity() {
         writeInt32LE(request, 24, 0)
         val sent = sendRndisControlMessage(connection, interfaceId, request)
         if (sent < 0) {
-            throw IllegalStateException("RNDIS query send failed for oid 0x${oid.toString(16)}")
+            throw IllegalStateException("USB Ethernet query send failed for oid 0x${oid.toString(16)}")
         }
         return readRndisQueryComplete(connection, interfaceId, requestId, responseSize)
     }
@@ -437,7 +547,7 @@ class MainActivity : FlutterActivity() {
         System.arraycopy(value, 0, request, 24, value.size)
         val sent = sendRndisControlMessage(connection, interfaceId, request)
         if (sent < 0) {
-            throw IllegalStateException("RNDIS set send failed for oid 0x${oid.toString(16)}")
+            throw IllegalStateException("USB Ethernet set send failed for oid 0x${oid.toString(16)}")
         }
         return readRndisSetComplete(connection, interfaceId, requestId)
     }
@@ -446,15 +556,15 @@ class MainActivity : FlutterActivity() {
         val response = readRndisResponse(connection, interfaceId)
         val messageType = readInt32LE(response, 0)
         if (messageType != 0x80000004.toInt()) {
-            throw IllegalStateException("Unexpected RNDIS query response 0x${messageType.toString(16)}")
+            throw IllegalStateException("Unexpected USB Ethernet query response 0x${messageType.toString(16)}")
         }
         val returnedRequestId = readInt32LE(response, 8)
         if (returnedRequestId != requestId) {
-            throw IllegalStateException("RNDIS query request id mismatch")
+            throw IllegalStateException("USB Ethernet query request id mismatch")
         }
         val status = readInt32LE(response, 12)
         if (status != 0x00000000) {
-            throw IllegalStateException("RNDIS query failed status 0x${status.toString(16)}")
+            throw IllegalStateException("USB Ethernet query failed status 0x${status.toString(16)}")
         }
         val length = readInt32LE(response, 16)
         val offset = readInt32LE(response, 20)
@@ -467,15 +577,15 @@ class MainActivity : FlutterActivity() {
         val response = readRndisResponse(connection, interfaceId)
         val messageType = readInt32LE(response, 0)
         if (messageType != 0x80000005.toInt()) {
-            throw IllegalStateException("Unexpected RNDIS set response 0x${messageType.toString(16)}")
+            throw IllegalStateException("Unexpected USB Ethernet set response 0x${messageType.toString(16)}")
         }
         val returnedRequestId = readInt32LE(response, 8)
         if (returnedRequestId != requestId) {
-            throw IllegalStateException("RNDIS set request id mismatch")
+            throw IllegalStateException("USB Ethernet set request id mismatch")
         }
         val status = readInt32LE(response, 12)
         if (status != 0x00000000) {
-            throw IllegalStateException("RNDIS set failed status 0x${status.toString(16)}")
+            throw IllegalStateException("USB Ethernet set failed status 0x${status.toString(16)}")
         }
         return response
     }
@@ -483,7 +593,7 @@ class MainActivity : FlutterActivity() {
     private fun parseRndisInitializeComplete(response: ByteArray): RndisInitializeResult {
         val messageType = readInt32LE(response, 0)
         if (messageType != 0x80000002.toInt()) {
-            throw IllegalStateException("Unexpected RNDIS initialize response 0x${messageType.toString(16)}")
+            throw IllegalStateException("Unexpected USB Ethernet initialize response 0x${messageType.toString(16)}")
         }
         val status = readInt32LE(response, 12)
         val medium = readInt32LE(response, 28)
@@ -512,6 +622,15 @@ class MainActivity : FlutterActivity() {
         buffer[offset + 3] = ((value shr 24) and 0xFF).toByte()
     }
 
+    private fun writeUInt16BE(buffer: ByteArray, offset: Int, value: Int) {
+        buffer[offset] = ((value shr 8) and 0xFF).toByte()
+        buffer[offset + 1] = (value and 0xFF).toByte()
+    }
+
+    private fun readUInt16BE(buffer: ByteArray, offset: Int): Int {
+        return ((buffer[offset].toInt() and 0xFF) shl 8) or (buffer[offset + 1].toInt() and 0xFF)
+    }
+
     private fun readInt32LE(buffer: ByteArray, offset: Int): Int {
         return (buffer[offset].toInt() and 0xFF) or
             ((buffer[offset + 1].toInt() and 0xFF) shl 8) or
@@ -521,6 +640,14 @@ class MainActivity : FlutterActivity() {
 
     private fun bytesToHex(bytes: ByteArray): String {
         return bytes.joinToString(separator = "") { byte -> "%02x".format(byte) }
+    }
+
+    private fun macToString(bytes: ByteArray): String {
+        return bytes.joinToString(separator = ":") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+    }
+
+    private fun ipToString(bytes: ByteArray): String {
+        return bytes.joinToString(separator = ".") { byte -> (byte.toInt() and 0xFF).toString() }
     }
 
     private var rndisRequestId = 1
