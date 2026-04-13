@@ -151,6 +151,11 @@ const menuSections = [
     icon: Icons.usb_rounded,
   ),
   MenuSection(
+    title: 'USB Descriptor',
+    subtitle: 'Inspect device interfaces, endpoints, and permissions.',
+    icon: Icons.developer_board_rounded,
+  ),
+  MenuSection(
     title: 'USB Network',
     subtitle: 'Inspect USB network interfaces and probe camera ports.',
     icon: Icons.router_rounded,
@@ -730,6 +735,10 @@ class _SectionContent extends StatelessWidget {
         );
       case 'USB Devices':
         return _UsbDevicesPanel(
+          usbDeviceService: usbDeviceService,
+        );
+      case 'USB Descriptor':
+        return _UsbDescriptorPanel(
           usbDeviceService: usbDeviceService,
         );
       case 'USB Network':
@@ -1360,6 +1369,293 @@ class _UsbDevicesPanelState extends State<_UsbDevicesPanel> {
             onPressed: _loading ? null : _refresh,
             icon: const Icon(Icons.refresh_rounded),
             label: Text(_loading ? 'Scanning...' : 'Refresh USB Devices'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UsbDescriptorPanel extends StatefulWidget {
+  const _UsbDescriptorPanel({
+    required this.usbDeviceService,
+  });
+
+  final UsbDeviceService usbDeviceService;
+
+  @override
+  State<_UsbDescriptorPanel> createState() => _UsbDescriptorPanelState();
+}
+
+class _UsbDescriptorPanelState extends State<_UsbDescriptorPanel> {
+  List<UsbDeviceInfo> _devices = const [];
+  String _status = 'Tap refresh to inspect USB descriptors.';
+  bool _loading = false;
+  String? _selectedDeviceName;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _loading = true;
+      _status = 'Scanning USB descriptors...';
+    });
+    try {
+      final devices = await widget.usbDeviceService.listUsbDevices();
+      setState(() {
+        _devices = devices;
+        if (_selectedDeviceName == null && devices.isNotEmpty) {
+          _selectedDeviceName = devices.first.name;
+        }
+        _status = devices.isEmpty
+            ? 'No USB devices enumerated.'
+            : 'Found ${devices.length} USB device${devices.length == 1 ? '' : 's'}.';
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'USB descriptor scan failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  UsbDeviceInfo? get _selectedDevice {
+    if (_selectedDeviceName == null) {
+      return _devices.isEmpty ? null : _devices.first;
+    }
+    for (final device in _devices) {
+      if (device.name == _selectedDeviceName) {
+        return device;
+      }
+    }
+    return _devices.isEmpty ? null : _devices.first;
+  }
+
+  Future<void> _requestPermission(UsbDeviceInfo device) async {
+    setState(() {
+      _loading = true;
+      _status = 'Requesting permission for ${device.name}...';
+    });
+    try {
+      final message = await widget.usbDeviceService.requestPermission(device.name);
+      await _refresh();
+      setState(() {
+        _status = message;
+        _selectedDeviceName = device.name;
+      });
+    } catch (error) {
+      setState(() {
+        _status = 'Permission request failed: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _selectedDevice;
+    return _PanelShell(
+      title: 'USB Descriptor',
+      icon: Icons.developer_board_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _status,
+            style: const TextStyle(
+              color: AppColors.subtext,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_devices.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Text(
+                'No USB descriptors available yet.',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 14,
+                ),
+              ),
+            )
+          else
+            ..._devices.map(
+              (device) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _selectedDeviceName == device.name ? AppColors.blueSoft : AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _selectedDeviceName == device.name ? AppColors.blue : AppColors.border,
+                    ),
+                  ),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _selectedDeviceName = device.name;
+                      });
+                    },
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                device.productName == '-' ? device.name : device.productName,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.text,
+                                ),
+                              ),
+                            ),
+                            _InfoChip(
+                              label: device.hasPermission ? 'Permission Granted' : 'No Permission',
+                              color: device.hasPermission ? AppColors.teal : AppColors.red,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          device.summary,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.subtext,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Class ${device.deviceClass}  Subclass ${device.deviceSubclass}  Protocol ${device.deviceProtocol}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.subtext,
+                          ),
+                        ),
+                        Text(
+                          'Manufacturer: ${device.manufacturerName}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.subtext,
+                          ),
+                        ),
+                        Text(
+                          'Version: ${device.version}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.subtext,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        if (device.interfaces.isEmpty)
+                          const Text(
+                            'No interfaces exposed.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppColors.subtext,
+                            ),
+                          )
+                        else
+                          ...device.interfaces.map(
+                            (iface) => Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Interface ${iface.id}  Class ${iface.interfaceClass}  Subclass ${iface.interfaceSubclass}  Protocol ${iface.interfaceProtocol}',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.text,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    if (iface.endpoints.isEmpty)
+                                      const Text(
+                                        'No endpoints exposed.',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.subtext,
+                                        ),
+                                      )
+                                    else
+                                      ...iface.endpoints.map(
+                                        (endpoint) => Text(
+                                          'Endpoint 0x${endpoint.address.toRadixString(16).padLeft(2, '0')} attrs ${endpoint.attributes} max ${endpoint.maxPacketSize} interval ${endpoint.interval}',
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.subtext,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: FilledButton.icon(
+                            onPressed: _loading ? null : () => _requestPermission(device),
+                            icon: const Icon(Icons.key_rounded),
+                            label: Text(device.hasPermission ? 'Permission Already Granted' : 'Request Permission'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (selected != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Selected device: ${selected.name}',
+              style: const TextStyle(
+                color: AppColors.subtext,
+                fontSize: 13,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _loading ? null : _refresh,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(_loading ? 'Scanning...' : 'Refresh USB Descriptors'),
           ),
         ],
       ),
