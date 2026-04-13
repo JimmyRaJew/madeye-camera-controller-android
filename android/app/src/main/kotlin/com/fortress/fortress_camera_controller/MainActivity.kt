@@ -400,7 +400,7 @@ class MainActivity : FlutterActivity() {
             attempts.add("RNDIS init -> ${rndisResult.exceptionOrNull()?.message ?: "unknown error"}")
 
             val rawResult = runCatching {
-                probeUsbEthernetRaw(connection, dataInterface, bulkIn, bulkOut)
+                probeUsbEthernetRaw(connection, commInterface, dataInterface, bulkIn, bulkOut)
             }
             if (rawResult.isSuccess) {
                 val rawDetails = rawResult.getOrThrow().toMutableMap()
@@ -418,10 +418,12 @@ class MainActivity : FlutterActivity() {
 
     private fun probeUsbEthernetRaw(
         connection: UsbDeviceConnection,
+        commInterface: android.hardware.usb.UsbInterface,
         dataInterface: android.hardware.usb.UsbInterface,
         bulkIn: android.hardware.usb.UsbEndpoint,
         bulkOut: android.hardware.usb.UsbEndpoint,
     ): Map<String, Any?> {
+        setUsbEthernetPacketFilter(connection, commInterface.id, 0x0000000f)
         val sourceMac = byteArrayOf(0x02, 0x12, 0x34, 0x56, 0x78, 0x9a.toByte())
         val sourceIp = byteArrayOf(192.toByte(), 168.toByte(), 1.toByte(), 250.toByte())
         val targetIp = byteArrayOf(192.toByte(), 168.toByte(), 1.toByte(), 111.toByte())
@@ -449,6 +451,25 @@ class MainActivity : FlutterActivity() {
             }
         }
         throw IllegalStateException("No ARP reply received from camera")
+    }
+
+    private fun setUsbEthernetPacketFilter(
+        connection: UsbDeviceConnection,
+        interfaceId: Int,
+        packetFilter: Int,
+    ) {
+        val requested = connection.controlTransfer(
+            0x21,
+            0x43,
+            packetFilter,
+            interfaceId,
+            null,
+            0,
+            2000,
+        )
+        if (requested < 0) {
+            throw IllegalStateException("Unable to set USB Ethernet packet filter on interface $interfaceId")
+        }
     }
 
     private fun buildArpRequestFrame(sourceMac: ByteArray, sourceIp: ByteArray, targetIp: ByteArray): ByteArray {
