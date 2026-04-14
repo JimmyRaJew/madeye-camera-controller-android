@@ -307,6 +307,9 @@ class MainActivity : FlutterActivity() {
         connection: UsbDeviceConnection,
         intf: android.hardware.usb.UsbInterface,
     ) {
+        if (intf.alternateSetting == 0) {
+            return
+        }
         val requested = connection.controlTransfer(
             0x01,
             0x0B,
@@ -339,7 +342,6 @@ class MainActivity : FlutterActivity() {
             if (!connection.claimInterface(dataInterface, true)) {
                 throw IllegalStateException("Unable to claim data interface ${dataInterface.id}")
             }
-            setInterfaceAlternateSetting(connection, commInterface)
             setInterfaceAlternateSetting(connection, dataInterface)
 
             val interruptEndpoint = findInterruptInEndpoint(commInterface)
